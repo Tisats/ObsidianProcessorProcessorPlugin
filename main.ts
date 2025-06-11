@@ -800,26 +800,25 @@ export default class ProcessorProcessorPlugin extends Plugin {
         // Step 3: Verify each unique URL and extract entities if it's a valid, current list
         for (const urlInfo of uniqueUrlsToProcess) {
 
-            // Avoid re-processing if this exact URL (normalized) was somehow added to processedUrlDetails already
-            // This is a safeguard, uniqueUrlsToProcess should ideally handle this.
+            // Avoid re-processing if this exact URL was somehow added to processedUrlDetails already
             if (processedUrlDetails.some(p => p.url.replace(/\/$/, '') === urlInfo.url.replace(/\/$/, ''))) {
                  if(this.settings.verboseDebug) console.log(`URL ${urlInfo.url} already processed in processedUrlDetails, skipping re-verification.`);
                 continue;
             }
 
             let currentUrlExtractedCount = 0;
-            // Initialize processedUrlInfo for logging, merging urlInfo with defaults
-            let currentProcessedUrlInfo: ProcessedUrlInfo = { ...urlInfo, documentType: urlInfo.documentType || 'duckduckgo_rb_search_result' }; // Default type if not set
+            let currentProcessedUrlInfo: ProcessedUrlInfo = { ...urlInfo, documentType: urlInfo.documentType || 'duckduckgo_rb_search_result' }; 
 
             const verificationResult = await this.verifySubprocessorListUrl(urlInfo.url, processorName, rbToken);
-            currentProcessedUrlInfo = { // Update with verification attempt details
+            currentProcessedUrlInfo = { 
                 ...currentProcessedUrlInfo,
-                verificationMethod: 'rightbrain', // Assuming RB is always used for verification now
+                verificationMethod: 'rightbrain',
                 isList: verificationResult?.isList || false,
-                isCurrent: verificationResult?.isCurrent || false, // isCurrent implies isList
+                isCurrent: verificationResult?.isCurrent || false, 
                 verificationReasoning: verificationResult?.reasoning || 'N/A'
             };
 
+            // ---- THIS IS THE KEY LOGIC CHANGE ----
             if (verificationResult?.isList && verificationResult.isCurrent && verificationResult.isCorrectProcessor) {
                 
                 currentProcessedUrlInfo.documentType = 'verified_current_subprocessor_list';
@@ -838,8 +837,15 @@ export default class ProcessorProcessorPlugin extends Plugin {
                 
                 currentProcessedUrlInfo.extractedSubprocessorsCount = currentUrlExtractedCount;
                 processedUrlDetails.push(currentProcessedUrlInfo);
+
+                // If we successfully extracted entities from a verified list, we are done.
+                if (currentUrlExtractedCount > 0) {
+                    if (this.settings.verboseDebug) console.log(`Found and processed a valid subprocessor list at ${urlInfo.url}. Stopping search.`);
+                    new Notice(`Found valid list for ${processorName}. Finishing process.`);
+                    break; // <-- EXIT THE LOOP EARLY
+                }
                 
-            } else { // This block now catches lists that are not current OR not for the correct processor
+            } else { // This block catches lists that are not current OR not for the correct processor
                 const urlLower = urlInfo.url.toLowerCase();
                 const containsKeyword = SUBPROCESSOR_URL_KEYWORDS.some(keyword => urlLower.includes(keyword));
 
@@ -848,7 +854,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
                     flaggedCandidateUrlCount++;
                 } else if (verificationResult?.isList && !verificationResult.isCorrectProcessor) {
                     currentProcessedUrlInfo.documentType = 'verified_list_for_wrong_processor';
-                    flaggedCandidateUrlCount++; // Also flag these as they are interesting but were correctly ignored
+                    flaggedCandidateUrlCount++;
                 } else if (verificationResult?.isList) { 
                     currentProcessedUrlInfo.documentType = 'verified_subprocessor_list (not_current)';
                 } else { 
@@ -1171,18 +1177,20 @@ export default class ProcessorProcessorPlugin extends Plugin {
             newClientRelationships.forEach(rel => {
                 const { filePathName: primaryFilePathName, originalNameAsAlias: primaryOriginalName } = this.sanitizeNameForFilePathAndAlias(rel.PrimaryProcessor);
                 const markdownPrimaryAlias = primaryOriginalName.replace(/\n/g, ' ').replace(/[\[\]()|]/g, '');
-                
-                // Using the corrected Markdown link format for tables
-                const primaryProcessorNameAsPlainText = markdownPrimaryAlias;
-
+            
+                // Correctly create the standard Markdown link for use in the table
+                const processorsFolder = this.settings.processorsFolderPath;
+                const linkTarget = encodeURI(`${processorsFolder}/${primaryFilePathName}.md`);
+                const primaryProcessorLink = `[${markdownPrimaryAlias}](${linkTarget})`;
+            
                 const processingFunctionDisplay = (rel.ProcessingFunction || "N/A").replace(/\n/g, "<br>").replace(/\|/g, "\\|");
                 const locationDisplay = (rel.Location || "N/A").replace(/\n/g, "<br>").replace(/\|/g, "\\|");
                 const sourceUrlLink = rel.SourceURL.startsWith("http") ? `[Source](${rel.SourceURL})` : rel.SourceURL;
-
-                // Create the inner content of the row to be added to the Set
+            
+                // Create the inner content of the row to be added to the Set, now using the correct link variable
                 const rowContent = ` ${primaryProcessorLink} | ${processingFunctionDisplay} | ${locationDisplay} | ${sourceUrlLink} `;
                 allRows.add(rowContent);
-});
+            });
             
             // Step 3: Build the final, complete table from the Set of all rows
             let clientTableMd = `| Primary Processor | Processing Function | Location | Source URL |\n`;
