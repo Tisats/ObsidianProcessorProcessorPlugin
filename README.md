@@ -61,7 +61,7 @@ Please be aware that your `Client Secret` is stored in plaintext in this file. T
 ### ✨ Core Features
 
 * **One-Command Setup:** Get started in minutes. Paste your credentials from RightBrain and the plugin automatically configures itself and creates the required AI tasks in your project.
-* **Smart Recursive Mapping:** Start with a single company and automatically cascade searches through their subprocessors, building a deep dependency map. The search is "smart"—it uses a cache to avoid re-analyzing recent vendors and maps aliases to existing notes to prevent duplicates.
+* **Smart Recursive Mapping:** Start with a single company and automatically cascade searches through their subprocessors, building a deep dependency map. The search is "smart"—it uses a cache to avoid re-analyzing recent vendors and maps aliases to existing notes to prevent duplicates. **Note:** this powerful feature can take a long time to complete. It is recommended to start with a mapping depth of 2 to avoid excessive processing time.
 * **Handle Difficult Sources:** Some subprocessor lists are buried in PDFs, hard-to-parse web pages, or not publicly available at all. The **`Manually Add Subprocessor List URL`** and **`Input Subprocessor List from Text`** features allow you to point the AI directly at a URL or simply paste the text to ensure nothing is missed.
 * **AI-Powered Verification & Extraction:** Uses RightBrain to verify if a URL is a genuine, current subprocessor list and then extracts the names of all third-party vendors and internal company affiliates.
 * **Automated Note Creation & Linking:** Creates a central, linked note for each processor and subprocessor. A processor's note lists its subprocessors; a subprocessor's note lists who it's "Used By."
@@ -107,6 +107,17 @@ Your feedback is invaluable for guiding what comes next! If you have ideas for n
 * **Scope of Subprocessor Lists:** Vendor subprocessor lists are typically comprehensive and cover all of their services. For example, Google's list includes subprocessors for all its products (Workspace, Cloud, etc.). If you only use Google Workspace, the plugin will still identify and map all subprocessors from the master list, many of which may not be relevant to your (or your processor's) specific use case. The plugin accurately reflects the source documentation and does not attempt to guess which subprocessors apply to you, as this would be unreliable.
 * **Quality of Source Data:** The accuracy of the extracted relationships depends on the clarity and format of the source documents. Ambiguous or poorly formatted lists may lead to less accurate results.
 * **This is not Legal Advice:** The plugin is a tool to accelerate research. It is not a substitute for professional legal or compliance advice. Always verify critical information.
+
+---
+
+### Advanced Configuration
+
+The `Complete First-Time Setup` command handles all essential configuration. However, you can review and tweak settings by going to `Settings -> Community Plugins -> Processor Processor`. Here you can adjust:
+
+* **API Keys & Task IDs:** All credentials and task IDs are stored here.
+* **Mapping Depth:** The maximum number of levels the recursive mapping will traverse. **Warning:** Setting this to a high number (e.g., above 3) can result in very long processing times and a large number of API calls. It is strongly recommended to start with a depth of 2 or 3.
+* **Discovery Cache Duration:** How many days to consider a processor's data "fresh" before re-analyzing it in a recursive run.
+* **Folder Paths:** Change the default `Processors` and `Analysis Logs` folder locations.
 
 ---
 
