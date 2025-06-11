@@ -489,16 +489,17 @@ export default class ProcessorProcessorPlugin extends Plugin {
         new Notice(`Successfully added ${foundDocuments.length} document link(s) to ${processorName}.`);
     }
 
-    async setupRightBrainTasks() {
+    async setupRightBrainTasks(creds: { apiUrl: string, oauthUrl: string, clientId: string, clientSecret: string, orgId: string, projectId: string }) {
         new Notice("Starting RightBrain task setup...", 3000);
     
-        const rbToken = await this.getRightBrainAccessToken();
+        // This function will now use the credentials passed directly to it
+        const rbToken = await this.getRightBrainAccessToken(creds);
         if (!rbToken) {
-            new Notice("Setup failed: Could not get RightBrain Access Token.");
+            new Notice("Setup failed: Could not get RightBrain Access Token with provided credentials.");
             return;
         }
     
-        const existingTasks = await this.listAllRightBrainTasks(rbToken);
+        const existingTasks = await this.listAllRightBrainTasks(rbToken, creds);
         if (existingTasks === null) {
             new Notice("Setup failed: Could not retrieve existing tasks from RightBrain.");
             return;
@@ -514,11 +515,9 @@ export default class ProcessorProcessorPlugin extends Plugin {
                 tasksSkipped++;
             } else {
                 new Notice(`Creating task: '${taskDef.name}'...`);
-                const createdTask = await this.createRightBrainTask(rbToken, taskDef);
+                const createdTask = await this.createRightBrainTask(rbToken, taskDef, creds);
                 if (createdTask) {
                     tasksCreated++;
-                    // Optional: Automatically save the new Task ID to settings
-                    // This part requires careful mapping between task names and setting keys
                 }
             }
         }
@@ -532,18 +531,14 @@ export default class ProcessorProcessorPlugin extends Plugin {
      * @param rbToken The RightBrain access token.
      * @returns An array of task objects or null if an error occurs.
      */
-    private async listAllRightBrainTasks(rbToken: string): Promise<any[] | null> {
-        if (!this.settings.rightbrainOrgId || !this.settings.rightbrainProjectId) {
-            new Notice("RightBrain Org ID or Project ID not set.");
-            return null;
-        }
-        const tasksUrl = `${this.settings.rightbrainApiUrl}/org/${this.settings.rightbrainOrgId}/project/${this.settings.rightbrainProjectId}/task`;
+    private async listAllRightBrainTasks(rbToken: string, creds: { apiUrl: string, orgId: string, projectId: string }): Promise<any[] | null> {
+        // This function now uses the 'creds' object to build the URL
+        const tasksUrl = `${creds.apiUrl}/org/${creds.orgId}/project/${creds.projectId}/task`;
         const headers = { 'Authorization': `Bearer ${rbToken}` };
-    
+
         try {
             const response = await requestUrl({ url: tasksUrl, method: 'GET', headers: headers, throw: false });
             if (response.status === 200) {
-                // The API response nests the list under a 'tasks' key
                 return response.json.tasks || [];
             } else {
                 console.error("Failed to list RightBrain tasks:", response.status, response.text);
@@ -561,13 +556,14 @@ export default class ProcessorProcessorPlugin extends Plugin {
      * @param taskDefinition An object containing the full configuration for the new task.
      * @returns The created task object or null if an error occurs.
      */
-    private async createRightBrainTask(rbToken: string, taskDefinition: any): Promise<any | null> {
-        const createUrl = `${this.settings.rightbrainApiUrl}/org/${this.settings.rightbrainOrgId}/project/${this.settings.rightbrainProjectId}/task`;
+    private async createRightBrainTask(rbToken: string, taskDefinition: any, creds: { apiUrl: string, orgId: string, projectId: string }): Promise<any | null> {
+        // This function also uses the 'creds' object now
+        const createUrl = `${creds.apiUrl}/org/${creds.orgId}/project/${creds.projectId}/task`;
         const headers = {
             'Authorization': `Bearer ${rbToken}`,
             'Content-Type': 'application/json'
         };
-    
+
         try {
             const response = await requestUrl({
                 url: createUrl,
@@ -576,8 +572,8 @@ export default class ProcessorProcessorPlugin extends Plugin {
                 body: JSON.stringify(taskDefinition),
                 throw: false
             });
-    
-            if (response.status === 201 || response.status === 200) { // 201 = Created, 200 can also be success
+
+            if (response.status === 201 || response.status === 200) {
                 new Notice(`Successfully created task: '${taskDefinition.name}'`);
                 return response.json;
             } else {
@@ -1460,62 +1456,62 @@ export default class ProcessorProcessorPlugin extends Plugin {
     }
 
 
-    async getRightBrainAccessToken(): Promise<string | null> {
-        if (!this.settings.rightbrainClientId || !this.settings.rightbrainClientSecret) {
+    async getRightBrainAccessToken(creds?: { clientId: string, clientSecret: string, oauthUrl: string }): Promise<string | null> {
+        // Use the passed-in credentials if they exist, otherwise use the saved settings.
+        const clientId = creds?.clientId || this.settings.rightbrainClientId;
+        const clientSecret = creds?.clientSecret || this.settings.rightbrainClientSecret;
+        const oauthUrl = creds?.oauthUrl || this.settings.rightbrainOauth2Url;
+
+        if (!clientId || !clientSecret) {
             new Notice("RightBrain Client ID or Secret not configured.");
             return null;
         }
-        // Simple token cache (in-memory, expires after some time)
+
+        // Check for the cached token first
         if ((this as any)._rbToken && (this as any)._rbTokenExpiry > Date.now()) {
             if (this.settings.verboseDebug) console.log("Using cached RightBrain token.");
             return (this as any)._rbToken;
         }
 
-        const tokenUrl = `${this.settings.rightbrainOauth2Url}/oauth2/token`;
-                
+        const tokenUrl = `${oauthUrl}/oauth2/token`;
+        
         const bodyParams = new URLSearchParams();
         bodyParams.append('grant_type', 'client_credentials');
 
-
-        // For client_secret_basic, credentials are in the Authorization header.
-        const credentials = `${this.settings.rightbrainClientId}:${this.settings.rightbrainClientSecret}`;
-        const encodedCredentials = btoa(credentials); // Base64 encode
+        const credentials = `${clientId}:${clientSecret}`;
+        const encodedCredentials = btoa(credentials); 
 
         const headers = {
             'Authorization': `Basic ${encodedCredentials}`,
             'Content-Type': 'application/x-www-form-urlencoded',
-            'User-Agent': `ObsidianProcessorProcessorPlugin/${this.manifest.version}` // Good practice to include User-Agent
+            'User-Agent': `ObsidianProcessorProcessorPlugin/${this.manifest.version}`
         };
 
         try {
-            if (this.settings.verboseDebug) console.log("Requesting new RightBrain token with client_secret_basic.");
+            if (this.settings.verboseDebug) console.log("Requesting new RightBrain token.");
             const response = await requestUrl({
                 url: tokenUrl,
                 method: 'POST',
                 headers: headers,
                 body: bodyParams.toString(),
-                throw: false // Handle non-2xx responses manually
+                throw: false
             });
-
-            if (this.settings.verboseDebug) {
-                 console.log(`RB Token Request Status: ${response.status}. Response Text Snippet: ${response.text ? response.text.substring(0, 200) : "No Body"}`);
-            }
 
             if (response.status === 200 && response.json && response.json.access_token) {
                 if (this.settings.verboseDebug) console.log("Successfully obtained new RightBrain token.");
                 (this as any)._rbToken = response.json.access_token;
-                (this as any)._rbTokenExpiry = Date.now() + (response.json.expires_in || 3600) * 1000 - 600000; // Subtract 10 mins buffer
+                (this as any)._rbTokenExpiry = Date.now() + (response.json.expires_in || 3600) * 1000 - 600000;
                 return response.json.access_token;
             } else {
                 console.error("ProcessorProcessor: Failed to get RightBrain token.", response.status, response.text);
-                new Notice(`Failed to get RightBrain token: ${response.status}. Error: ${response.json?.error_description || response.text}. Check console.`);
-                (this as any)._rbToken = null; // Clear any stale token
+                new Notice(`Failed to get RightBrain token: ${response.status}.`);
+                (this as any)._rbToken = null;
                 (this as any)._rbTokenExpiry = 0;
                 return null;
             }
         } catch (error) {
             console.error("ProcessorProcessor: Network error fetching RightBrain token:", error);
-            new Notice("Network error fetching RightBrain token. Check console.");
+            new Notice("Network error fetching RightBrain token.");
             (this as any)._rbToken = null;
             (this as any)._rbTokenExpiry = 0;
             return null;
@@ -2680,44 +2676,50 @@ class PasteEnvModal extends Modal {
         // --- Part 1: Parse and Save Credentials ---
         const lines = this.pastedText.trim().split('\n');
         const settingsToUpdate: Partial<ProcessorProcessorSettings> = {};
-        let credsFoundCount = 0;
-
+        
         const keyMap: { [key: string]: keyof ProcessorProcessorSettings } = {
             'RB_ORG_ID': 'rightbrainOrgId',
             'RB_PROJECT_ID': 'rightbrainProjectId',
             'RB_CLIENT_ID': 'rightbrainClientId',
-            'RB_CLIENT_SECRET': 'rightbrainClientSecret'
+            'RB_CLIENT_SECRET': 'rightbrainClientSecret',
+            'RB_API_URL': 'rightbrainApiUrl',
+            'RB_OAUTH2_URL': 'rightbrainOauth2Url'
         };
-
+    
         for (const line of lines) {
             const parts = line.split('=');
             if (parts.length < 2) continue;
             const key = parts[0].trim();
-            let value = parts.slice(1).join('=').trim().replace(/["']/g, ''); // Remove quotes
-
+            let value = parts.slice(1).join('=').trim().replace(/["']/g, '');
+    
             if (key in keyMap && value) {
                 const settingKey = keyMap[key];
                 (settingsToUpdate as any)[settingKey] = value;
-                credsFoundCount++;
             }
         }
-
-        if (credsFoundCount < 4) {
-            new Notice("Setup failed. Could not find all required credentials (ORG_ID, PROJECT_ID, CLIENT_ID, CLIENT_SECRET) in the pasted text.");
+    
+        // Check if we found all the keys we need
+        if (!settingsToUpdate.rightbrainOrgId || !settingsToUpdate.rightbrainProjectId || !settingsToUpdate.rightbrainClientId || !settingsToUpdate.rightbrainClientSecret || !settingsToUpdate.rightbrainApiUrl || !settingsToUpdate.rightbrainOauth2Url) {
+            new Notice("Setup failed. Pasted text is missing one or more required values.", 7000);
             return;
         }
-
+        
         this.plugin.settings = Object.assign(this.plugin.settings, settingsToUpdate);
         await this.plugin.saveSettings();
-        new Notice(`Successfully updated ${credsFoundCount} credentials.`);
-
-        // --- Part 2: Call the Task Setup Logic ---
-        // We can now call the function directly, as the settings are saved.
-        // A small delay helps the user read the first notice.
+        new Notice(`Successfully updated credentials.`);
+    
+        // --- Part 2: Call the Task Setup Logic with the new values ---
         await new Promise(resolve => setTimeout(resolve, 1000));
         
-        // This function already exists in your plugin class
-        await this.plugin.setupRightBrainTasks(); 
+        // Pass the newly parsed credentials directly to the setup function
+        await this.plugin.setupRightBrainTasks({
+            apiUrl: settingsToUpdate.rightbrainApiUrl,
+            oauthUrl: settingsToUpdate.rightbrainOauth2Url,
+            clientId: settingsToUpdate.rightbrainClientId,
+            clientSecret: settingsToUpdate.rightbrainClientSecret,
+            orgId: settingsToUpdate.rightbrainOrgId,
+            projectId: settingsToUpdate.rightbrainProjectId
+        });
     }
 }
 
