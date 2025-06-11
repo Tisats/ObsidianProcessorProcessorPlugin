@@ -57,7 +57,7 @@ const DEFAULT_SETTINGS: ProcessorProcessorSettings = {
     createPagesForOwnEntities: false,
     verboseDebug: false,
     maxResultsPerProcessor: 1,
-    maxRecursiveDepth: 1,
+    maxRecursiveDepth: 2,
     discoveryCacheDays: 30,
     processorsFolderPath: 'Processors',
     analysisLogsFolderPath: 'Analysis Logs',
