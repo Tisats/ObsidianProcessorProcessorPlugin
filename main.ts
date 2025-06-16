@@ -1175,20 +1175,16 @@ export default class ProcessorProcessorPlugin extends Plugin {
 
             // Step 2: Process new relationships and add them to the Set
             newClientRelationships.forEach(rel => {
-                const { filePathName: primaryFilePathName, originalNameAsAlias: primaryOriginalName } = this.sanitizeNameForFilePathAndAlias(rel.PrimaryProcessor);
-                const markdownPrimaryAlias = primaryOriginalName.replace(/\n/g, ' ').replace(/[\[\]()|]/g, '');
-            
-                // Correctly create the standard Markdown link for use in the table
-                const processorsFolder = this.settings.processorsFolderPath;
-                const linkTarget = encodeURI(`${processorsFolder}/${primaryFilePathName}.md`);
-                const primaryProcessorLink = `[${markdownPrimaryAlias}](${linkTarget})`;
-            
+                const { originalNameAsAlias: primaryOriginalName } = this.sanitizeNameForFilePathAndAlias(rel.PrimaryProcessor);
+                // We no longer create a link, so we just use the name and escape any pipe characters.
+                const primaryProcessorPlainText = primaryOriginalName.replace(/\|/g, "\\|");
+
                 const processingFunctionDisplay = (rel.ProcessingFunction || "N/A").replace(/\n/g, "<br>").replace(/\|/g, "\\|");
                 const locationDisplay = (rel.Location || "N/A").replace(/\n/g, "<br>").replace(/\|/g, "\\|");
                 const sourceUrlLink = rel.SourceURL.startsWith("http") ? `[Source](${rel.SourceURL})` : rel.SourceURL;
             
-                // Create the inner content of the row to be added to the Set, now using the correct link variable
-                const rowContent = ` ${primaryProcessorLink} | ${processingFunctionDisplay} | ${locationDisplay} | ${sourceUrlLink} `;
+                // Create the inner content of the row, now using plain text for the primary processor.
+                const rowContent = ` ${primaryProcessorPlainText} | ${processingFunctionDisplay} | ${locationDisplay} | ${sourceUrlLink} `;
                 allRows.add(rowContent);
             });
             
