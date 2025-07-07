@@ -1288,7 +1288,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
                 if (this.settings.verboseDebug) console.log(`Folder created: ${normalizedPath}`);
             }
             // else { if (this.settings.verboseDebug) console.log(`Folder already exists: ${normalizedPath}`); }
-        } catch (e: any) {
+        } catch (e) {
             // Don't throw, but log and notify. The operation might still proceed if the folder exists but an error occurred checking.
             console.error(`Error ensuring folder ${folderPath} exists:`, e);
             new Notice(`Error creating folder: ${folderPath}`);
