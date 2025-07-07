@@ -198,7 +198,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
                 new SearchModal(this.app, this.settings, async (processorName) => {
                     if (processorName) {
                         // Optional: Add a way for the user to set maxDepth, or use a default/setting
-                        await this.discoverRecursively(processorName, undefined, this.plugin.settings.maxRecursiveDepth);
+                        await this.discoverRecursively(processorName, undefined, this.settings.maxRecursiveDepth);
 
                     }
                 }).open();
@@ -2698,7 +2698,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
         // Define our ideal graph settings
         const graphSettings = {
             "collapse-filter": true,
-            "search": `path:"${processorsPath}" -path:"${processorsPath}/_Archive"`, 
+            "search": `path:"${this.settings.processorsFolderPath}" -path:"${this.settings.processorsFolderPath}/_Archive"`, 
             "showTags": false,
             "showAttachments": false,
             "hideUnresolved": true,

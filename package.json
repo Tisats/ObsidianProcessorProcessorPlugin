@@ -13,7 +13,7 @@
 	},
 	"license": "MIT",
 	"author": "Tisats",
-	"type": "ESM",
+	"type": "module",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
