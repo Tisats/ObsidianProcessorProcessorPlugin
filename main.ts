@@ -1,5 +1,4 @@
 import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, requestUrl, TFile, Menu, MenuItem, FrontMatterCache, TFolder, TextComponent, TextAreaComponent, ButtonComponent } from 'obsidian';
-import taskDefinitions from './task_definitions.json';
 
 // ----- CONSTANTS -----
 const SUBPROCESSOR_URL_KEYWORDS = [
@@ -12,6 +11,11 @@ const SUBPROCESSOR_URL_KEYWORDS = [
 
 
 // ----- SETTINGS INTERFACE AND DEFAULTS -----
+export interface LlmModel {
+    id: string;
+    alias: string;
+  }
+
 interface ProcessorProcessorSettings {
     serpApiKey: string;
     rightbrainClientId: string;
@@ -37,6 +41,16 @@ interface ProcessorProcessorSettings {
     rightbrainFindDpaTaskId: string;
     rightbrainFindTosTaskId: string; 
     rightbrainFindSecurityTaskId: string;
+    autoSynchronizeTasks: boolean;
+    llmModelList: LlmModel[];
+    llmModelListLastUpdated: number;
+    verifyUrlModelId: string;
+    extractEntitiesModelId: string;
+    deduplicateSubprocessorsModelId: string;
+    duckDuckGoSearchModelId: string;
+    findDpaModelId: string;
+    findTosModelId: string;
+    findSecurityModelId: string;
 }
 
 const DEFAULT_SETTINGS: ProcessorProcessorSettings = {
@@ -64,6 +78,16 @@ const DEFAULT_SETTINGS: ProcessorProcessorSettings = {
     rightbrainFindDpaTaskId: '', 
     rightbrainFindTosTaskId: '', 
     rightbrainFindSecurityTaskId: '',
+    autoSynchronizeTasks: true,
+    llmModelList: [],
+    llmModelListLastUpdated: 0,
+    verifyUrlModelId: '', // We'll leave these blank and handle defaults in the UI
+    extractEntitiesModelId: '',
+    deduplicateSubprocessorsModelId: '',
+    duckDuckGoSearchModelId: '',
+    findDpaModelId: '',
+    findTosModelId: '',
+    findSecurityModelId: '',
 }
 
 // ----- DATA STRUCTURES -----
@@ -108,6 +132,12 @@ export default class ProcessorProcessorPlugin extends Plugin {
     async onload() {
         this.processedInCurrentRecursiveSearch = new Set<string>();
         await this.loadSettings();
+        
+        this.updateLlmModelList(false); 
+
+        if (this.settings.autoSynchronizeTasks) {
+            setTimeout(() => this.synchronizeRightBrainTasks(), 1000); 
+        }
 
         this.addRibbonIcon('link', 'Manually Add Subprocessor List URL', (evt: MouseEvent) => {
             new ManualInputModal(this.app, async (processorName, listUrl, isPrimary) => { // <-- Updated signature
@@ -184,10 +214,26 @@ export default class ProcessorProcessorPlugin extends Plugin {
         });
 
         this.addCommand({
+            id: 'synchronize-rightbrain-tasks',
+            name: 'Synchronize RightBrain Tasks',
+            callback: () => {
+                this.synchronizeRightBrainTasks();
+            }
+        });
+
+        this.addCommand({
             id: 'complete-first-time-setup',
             name: 'Complete First-Time Setup (Credentials & Tasks)',
             callback: () => {
                 new PasteEnvModal(this.app, this).open();
+            }
+        });
+
+        this.addCommand({
+            id: 'apply-recommended-graph-settings',
+            name: 'Apply Recommended Graph Settings',
+            callback: () => {
+                this.applyRecommendedGraphSettings();
             }
         });
 
@@ -293,6 +339,76 @@ export default class ProcessorProcessorPlugin extends Plugin {
 
     async saveSettings() {
         await this.saveData(this.settings);
+    }
+
+    /**
+     * Fetches the list of available LLM models from the Rightbrain API.
+     * @returns A promise that resolves to an array of LlmModel objects.
+     */
+    async fetchLlmModels(): Promise<LlmModel[]> {
+        const rbToken = await this.getRightBrainAccessToken();
+        if (!rbToken) {
+            console.error("Cannot fetch LLM models without an access token.");
+            return [];
+        }
+
+        const modelsUrl = `${this.settings.rightbrainApiUrl}/org/${this.settings.rightbrainOrgId}/project/${this.settings.rightbrainProjectId}/model`;
+        const headers = { 'Authorization': `Bearer ${rbToken}` };
+
+        try {
+            const response = await requestUrl({ url: modelsUrl, method: 'GET', headers: headers, throw: false });
+
+            // FIX: Check if the response itself is an array
+            if (response.status === 200 && Array.isArray(response.json)) {
+                // FIX: Map over the response.json directly, not response.json.models
+                return response.json.map((model: any) => ({
+                    id: model.id,
+                    alias: model.alias
+                }));
+            } else {
+                console.error("Failed to list RightBrain LLM models:", response.status, response.text);
+                return [];
+            }
+        } catch (error) {
+            console.error("Error fetching RightBrain LLM models:", error);
+            return [];
+        }
+    }
+
+    /**
+     * Updates the cached list of LLM models if the cache is stale or if forced.
+     * @param force - If true, bypasses the cache check.
+     */
+    async updateLlmModelList(force: boolean = false): Promise<void> {
+        const now = Date.now();
+        const cacheDuration = 24 * 60 * 60 * 1000; // 24 hours
+
+        const hasCredentials = this.settings.rightbrainClientId && this.settings.rightbrainOrgId && this.settings.rightbrainProjectId;
+
+        if (!force && this.settings.llmModelList.length > 0 && (now - this.settings.llmModelListLastUpdated < cacheDuration)) {
+            return; // Use cached data
+        }
+
+        if (!hasCredentials) {
+            return; // Can't fetch without credentials.
+        }
+
+        try {
+            const models = await this.fetchLlmModels();
+            if (models.length > 0) {
+                this.settings.llmModelList = models;
+                this.settings.llmModelListLastUpdated = now;
+                await this.saveSettings();
+                if (force) {
+                    new Notice('LLM model list has been updated.');
+                }
+            }
+        } catch (error) {
+            console.error("Failed to update LLM model list:", error);
+            if (force) {
+                new Notice('Failed to update LLM model list. Check console.');
+            }
+        }
     }
 
     private openManualTextEntryModal(initialProcessorName?: string) {
@@ -489,42 +605,189 @@ export default class ProcessorProcessorPlugin extends Plugin {
         new Notice(`Successfully added ${foundDocuments.length} document link(s) to ${processorName}.`);
     }
 
-    async setupRightBrainTasks(creds: { apiUrl: string, oauthUrl: string, clientId: string, clientSecret: string, orgId: string, projectId: string }) {
-        new Notice("Starting RightBrain task setup...", 3000);
+    async synchronizeRightBrainTasks() {
+        new Notice("Starting RightBrain task synchronization...", 4000);
     
-        // This function will now use the credentials passed directly to it
+        const creds = {
+            apiUrl: this.settings.rightbrainApiUrl,
+            oauthUrl: this.settings.rightbrainOauth2Url,
+            clientId: this.settings.rightbrainClientId,
+            clientSecret: this.settings.rightbrainClientSecret,
+            orgId: this.settings.rightbrainOrgId,
+            projectId: this.settings.rightbrainProjectId
+        };
+    
         const rbToken = await this.getRightBrainAccessToken(creds);
         if (!rbToken) {
-            new Notice("Setup failed: Could not get RightBrain Access Token with provided credentials.");
+            new Notice("Task sync failed: Could not get RightBrain Access Token.", 10000);
             return;
         }
     
+        let localTaskDefs: any[];
+        try {
+            const adapter = this.app.vault.adapter;
+            const filePath = `${this.manifest.dir}/task_definitions.json`;
+            if (!(await adapter.exists(filePath))) {
+                new Notice("Task sync failed: task_definitions.json not found.", 10000);
+                return;
+            }
+            localTaskDefs = JSON.parse(await adapter.read(filePath));
+        } catch (error) {
+            new Notice("Task sync failed: Could not read task_definitions.json. Check console.", 10000);
+            console.error("ProcessorProcessor: Failed to load local task definitions:", error);
+            return;
+        }
+    
+        const serverTasksArray = await this.listAllRightBrainTasks(rbToken, creds);
+        if (serverTasksArray === null) {
+            new Notice("Task sync failed: Could not retrieve tasks from RightBrain.", 10000);
+            return;
+        }
+        const serverTasksMap = new Map(serverTasksArray.map((task: any) => [task.name, task]));
+    
+        for (const localDef of localTaskDefs) {
+            const serverTask = serverTasksMap.get(localDef.name);
+    
+            const modelSettingKeyMap: { [key: string]: keyof ProcessorProcessorSettings } = {
+                'rightbrainVerifyUrlTaskId': 'verifyUrlModelId',
+                'rightbrainExtractEntitiesTaskId': 'extractEntitiesModelId',
+                'rightbrainDeduplicateSubprocessorsTaskId': 'deduplicateSubprocessorsModelId',
+                'rightbrainDuckDuckGoSearchTaskId': 'duckDuckGoSearchModelId',
+                'rightbrainFindDpaTaskId': 'findDpaModelId',
+                'rightbrainFindTosTaskId': 'findTosModelId',
+                'rightbrainFindSecurityTaskId': 'findSecurityModelId'
+            };
+            const modelSettingKey = modelSettingKeyMap[localDef.setting_key];
+            const userSelectedModelId = modelSettingKey ? (this.settings as any)[modelSettingKey] : null;
+
+            // Create a clean payload with only the properties needed for a revision.
+            const newRevisionPayload: any = {
+                system_prompt: localDef.system_prompt,
+                user_prompt: localDef.user_prompt,
+                output_format: localDef.output_format,
+                input_processors: localDef.input_processors || [],
+                enabled: localDef.enabled,
+                llm_model_id: userSelectedModelId || localDef.llm_model_id
+            };
+    
+            if (!serverTask) {
+                if (this.settings.verboseDebug) console.log(`Task '${localDef.name}' not found on server. Creating...`);
+                const createTaskPayload = { ...newRevisionPayload, name: localDef.name, description: localDef.description };
+                await this.createRightBrainTask(rbToken, createTaskPayload, creds);
+            } else {
+                const latestRevision = serverTask.task_revisions?.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+                
+                const needsUpdate = !latestRevision ||
+                                    latestRevision.system_prompt !== newRevisionPayload.system_prompt ||
+                                    latestRevision.user_prompt !== newRevisionPayload.user_prompt ||
+                                    latestRevision.llm_model_id !== newRevisionPayload.llm_model_id ||
+                                    JSON.stringify(latestRevision.output_format) !== JSON.stringify(newRevisionPayload.output_format);
+    
+                if (needsUpdate) {
+                    if (this.settings.verboseDebug) console.log(`Task '${localDef.name}' has updates. Creating new revision...`);
+                    await this.updateRightBrainTask(rbToken, serverTask.id, newRevisionPayload, localDef.name, creds);
+                }
+            }
+        }
+    
+        const finalServerTasks = await this.listAllRightBrainTasks(rbToken, creds);
+        if (finalServerTasks === null) {
+            new Notice("Task sync failed: Could not fetch final task list to save IDs.", 10000);
+            return;
+        }
+        const finalTaskMap = new Map(finalServerTasks.map((task: any) => [task.name, task.id]));
+    
+        let tasksPopulated = 0;
+        for (const localDef of localTaskDefs) {
+            const settingKey = localDef.setting_key as keyof ProcessorProcessorSettings;
+            if (settingKey && finalTaskMap.has(localDef.name)) {
+                (this.settings as any)[settingKey] = finalTaskMap.get(localDef.name);
+                tasksPopulated++;
+            }
+        }
+    
+        await this.saveSettings();
+        new Notice(`RightBrain tasks synchronized successfully. ${tasksPopulated} tasks configured.`, 10000);
+    }
+
+    async setupRightBrainTasks(creds: { apiUrl: string, oauthUrl: string, clientId: string, clientSecret: string, orgId: string, projectId: string }) {
+        new Notice("Step 1: Verifying tasks on RightBrain...", 4000);
+
+        // Get auth token and load local definitions from the JSON file
+        const rbToken = await this.getRightBrainAccessToken(creds);
+        if (!rbToken) {
+            new Notice("Setup failed: Could not get RightBrain Access Token.");
+            return;
+        }
+
+        let taskDefs: any[]; // Using 'any[]' to easily access the custom 'setting_key' property
+        try {
+            const adapter = this.app.vault.adapter;
+            const pluginDir = this.manifest.dir;
+            const filePath = `${pluginDir}/task_definitions.json`;
+            if (!(await adapter.exists(filePath))) {
+                new Notice("Error: task_definitions.json not found in plugin folder.", 7000);
+                return;
+            }
+            const fileContent = await adapter.read(filePath);
+            taskDefs = JSON.parse(fileContent);
+        } catch (error) {
+            new Notice("Error reading or parsing task_definitions.json. Check console.", 7000);
+            console.error("ProcessorProcessor: Failed to load task definitions from file:", error);
+            return;
+        }
+
+        // --- Step 1: Ensure all tasks from definitions exist on the server, creating any that are missing ---
         const existingTasks = await this.listAllRightBrainTasks(rbToken, creds);
         if (existingTasks === null) {
             new Notice("Setup failed: Could not retrieve existing tasks from RightBrain.");
             return;
         }
-    
-        const existingTaskNames = new Set(existingTasks.map(task => task.name));
-        let tasksCreated = 0;
-        let tasksSkipped = 0;
-    
-        for (const taskDef of taskDefinitions) {
-            if (existingTaskNames.has(taskDef.name)) {
-                new Notice(`Task '${taskDef.name}' already exists. Skipping.`);
-                tasksSkipped++;
-            } else {
-                new Notice(`Creating task: '${taskDef.name}'...`);
-                const createdTask = await this.createRightBrainTask(rbToken, taskDef, creds);
-                if (createdTask) {
-                    tasksCreated++;
-                }
+        const existingTaskNames = new Set(existingTasks.map((task: any) => task.name));
+
+        for (const taskDef of taskDefs) {
+            if (!existingTaskNames.has(taskDef.name)) {
+                new Notice(`Creating missing task: '${taskDef.name}'...`);
+                await this.createRightBrainTask(rbToken, taskDef, creds);
+                await new Promise(resolve => setTimeout(resolve, 500)); // Pause to prevent rate-limiting
             }
         }
-    
-        new Notice(`Setup complete. Created: ${tasksCreated} task(s), Skipped: ${tasksSkipped} existing task(s).`, 10000);
+
+        // --- Step 2: Re-fetch the complete list of tasks to get definitive IDs ---
+        new Notice("Step 2: Fetching all task IDs...", 4000);
+        const allServerTasks = await this.listAllRightBrainTasks(rbToken, creds);
+        if (allServerTasks === null) {
+            new Notice("Error: Could not fetch the final list of tasks to save their IDs.");
+            return;
+        }
+
+        // --- Step 3: Create a map of Task Name -> Task ID for easy lookup ---
+        const serverTaskMap = new Map(allServerTasks.map((task: any) => [task.name, task.id]));
+        let tasksPopulated = 0;
+
+        // --- Step 4: Loop through local definitions and populate settings using the map ---
+        for (const taskDef of taskDefs) {
+            const settingKey = taskDef.setting_key as keyof ProcessorProcessorSettings;
+            if (settingKey && serverTaskMap.has(taskDef.name)) {
+                const taskId = serverTaskMap.get(taskDef.name);
+                if (taskId) {
+                    (this.settings as any)[settingKey] = taskId;
+                    tasksPopulated++;
+                }
+            } else {
+                console.warn(`Could not find a matching task on the server for local definition: "${taskDef.name}"`);
+            }
+        }
+        
+        // --- Step 5: Save the fully populated settings object to data.json ---
+        await this.saveSettings();
+        
+        if (tasksPopulated === taskDefs.length) {
+            new Notice(`Success! All ${tasksPopulated} task IDs have been configured and saved.`);
+        } else {
+            new Notice(`Setup finished, but only ${tasksPopulated} of ${taskDefs.length} task IDs could be saved.`);
+        }
     }
-    
     
     /**
      * Fetches a list of all tasks from the configured RightBrain project.
@@ -539,7 +802,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
         try {
             const response = await requestUrl({ url: tasksUrl, method: 'GET', headers: headers, throw: false });
             if (response.status === 200) {
-                return response.json.tasks || [];
+                return response.json.results || [];
             } else {
                 console.error("Failed to list RightBrain tasks:", response.status, response.text);
                 return null;
@@ -1761,8 +2024,11 @@ export default class ProcessorProcessorPlugin extends Plugin {
         const payload = {
             task_input: taskVariables
         };
-        // ----------------------------
-    
+        
+        if (this.settings.verboseDebug) {
+            console.log(`[callRightBrainTask] Sending Request to Task ID ${taskId.substring(0,8)}... Payload:`, JSON.stringify(payload, null, 2));
+        }
+        
         try {
             const response = await requestUrl({
                 url: taskRunUrl,
@@ -1773,6 +2039,9 @@ export default class ProcessorProcessorPlugin extends Plugin {
             });
     
             if (response.json && (response.status === 200 || response.status === 201)) {
+                if (this.settings.verboseDebug) {
+                    console.log(`[callRightBrainTask] Success for Task ID ${taskId.substring(0,8)}... Full Response:`, JSON.stringify(response.json, null, 2));
+                }
                 return response.json; 
             } else {
                 new Notice(`RightBrain Task ${taskId.substring(0,8)}... failed: ${response.status}. Check console.`, 7000);
@@ -1927,6 +2196,80 @@ export default class ProcessorProcessorPlugin extends Plugin {
         return aliasMap;
     }
 
+            /**
+     * Updates an existing RightBrain task by creating a new revision.
+     * @param rbToken The RightBrain access token.
+     * @param taskId The ID of the task to update.
+     * @param taskDefinition An object containing the new configuration for the task revision.
+     * @param creds Your RightBrain credentials.
+     * @returns The updated task object or null if an error occurs.
+     */
+
+    private async updateRightBrainTask(rbToken: string, taskId: string, newRevisionPayload: any, taskName: string, creds: { apiUrl: string, orgId: string, projectId: string }): Promise<any | null> {
+        const taskUrl = `${creds.apiUrl}/org/${creds.orgId}/project/${creds.projectId}/task/${taskId}`;
+        const headers = {
+            'Authorization': `Bearer ${rbToken}`,
+            'Content-Type': 'application/json'
+        };
+
+        try {
+            // --- STEP 1: Create the new revision ---
+            const createRevisionResponse = await requestUrl({
+                url: taskUrl,
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify(newRevisionPayload),
+                throw: false
+            });
+
+            if (createRevisionResponse.status !== 200) {
+                new Notice(`Error creating task revision for '${taskName}': ${createRevisionResponse.status} ${createRevisionResponse.text.substring(0, 100)}`, 10000);
+                console.error(`Error creating task revision for '${taskName}':`, createRevisionResponse.status, createRevisionResponse.text);
+                return null;
+            }
+
+            // --- STEP 2: Find the latest revision from the immediate response ---
+            const updatedTaskData = createRevisionResponse.json;
+            // FIX: Use `revisions` instead of `task_revisions`
+            const latestRevision = updatedTaskData.revisions?.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+
+            if (!latestRevision) {
+                new Notice(`Could not find the new revision for '${taskName}' in the API response.`, 7000);
+                console.error("Could not find 'revisions' array in the response from creating a revision:", updatedTaskData);
+                return null;
+            }
+
+            // --- STEP 3: Activate the new revision ---
+            const activationPayload = {
+                active_revisions: [{
+                    task_revision_id: latestRevision.id,
+                    weight: 1
+                }]
+            };
+
+            const activateRevisionResponse = await requestUrl({
+                url: taskUrl,
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify(activationPayload),
+                throw: false
+            });
+            
+            if (activateRevisionResponse.status === 200) {
+                    new Notice(`Successfully updated and activated task: '${taskName}'`);
+                    return activateRevisionResponse.json;
+            } else {
+                new Notice(`Failed to activate new revision for '${taskName}': ${activateRevisionResponse.status}`, 7000);
+                console.error(`Error activating revision for '${taskName}':`, activateRevisionResponse.status, activateRevisionResponse.text);
+                return null;
+            }
+
+        } catch (error) {
+            console.error(`Network error updating task '${taskName}':`, error);
+            return null;
+        }
+    }
+
     async runDeduplicationForFolder(folder: TFolder) {
         new Notice(`Preparing to deduplicate pages in ${folder.path}...`);
         if (!this.settings.rightbrainDeduplicateSubprocessorsTaskId) {
@@ -2002,61 +2345,62 @@ export default class ProcessorProcessorPlugin extends Plugin {
                 if (this.settings.verboseDebug) console.warn("Skipping invalid deduplication result set:", resultSet);
                 continue;
             }
-
+    
             const survivorFile = this.app.vault.getAbstractFileByPath(resultSet.survivor_file_path) as TFile;
             if (!survivorFile) {
                 if (this.settings.verboseDebug) console.warn(`Survivor file not found: ${resultSet.survivor_file_path}`);
                 continue;
             }
-
+    
             const originalSurvivorContent = await this.app.vault.read(survivorFile);
             
-            // --- Step 1: Gather all data from survivor and duplicates ---
-
-            // Gather aliases and rows from the survivor file first
+            // --- Step 1: Gather all data from survivor and duplicates, while archiving duplicates ---
+    
             const survivorCache = this.app.metadataCache.getFileCache(survivorFile);
             const allAliases = new Set<string>((survivorCache?.frontmatter?.aliases || []).map(String));
             allAliases.add(survivorFile.basename);
             const allRows = new Set<string>(this.extractClientTableRows(originalSurvivorContent));
-
-            // Now, loop through duplicates to gather their data
+    
+            // <-- NEW: Ensure the archive folder exists.
+            const archiveFolderPath = `${this.settings.processorsFolderPath}/_Archive`;
+            await this.ensureFolderExists(archiveFolderPath);
+    
             for (const dupFilePath of resultSet.duplicate_file_paths) {
                 if (dupFilePath === survivorFile.path) continue;
                 const dupFile = this.app.vault.getAbstractFileByPath(dupFilePath) as TFile;
                 if (dupFile) {
                     const dupContent = await this.app.vault.read(dupFile);
                     const dupCache = this.app.metadataCache.getFileCache(dupFile);
-                    // Add duplicate's aliases and basename to the set
+    
                     (dupCache?.frontmatter?.aliases || []).map(String).forEach(alias => allAliases.add(alias));
                     allAliases.add(dupFile.basename);
-                    // Add duplicate's "Used By" rows to the set
                     this.extractClientTableRows(dupContent).forEach(row => allRows.add(row));
                     
                     try {
-                        await this.app.vault.delete(dupFile);
+                        // <-- NEW: Move the duplicate file to an archive folder instead of deleting it.
+                        const newPath = `${archiveFolderPath}/${dupFile.name}`;
+                        await this.app.vault.rename(dupFile, newPath);
                     } catch (e) {
-                        console.error(`Failed to delete duplicate file ${dupFilePath}:`, e);
+                        console.error(`Failed to move duplicate file ${dupFilePath} to archive:`, e);
                     }
                 }
             }
-
-            // --- Step 2: Rebuild the file from scratch with merged data ---
-
-            // 2A: Isolate the original body of the survivor file (everything after the frontmatter)
+    
+            // --- Step 2: Rebuild the survivor file from scratch with merged data ---
+    
             const fmRegex = /^---\s*\n([\s\S]*?)\n---\s*\n/;
             const match = originalSurvivorContent.match(fmRegex);
             let survivorBody = match ? originalSurvivorContent.substring(match[0].length) : originalSurvivorContent;
-
-            // 2B: Rebuild the frontmatter string with all merged aliases
+    
             const existingTags = new Set<string>((survivorCache?.frontmatter?.tags || []).map(String));
+            // <-- NEW: Add a 'merged-processor' tag for easy searching.
+            existingTags.add("merged-processor"); 
+    
             let newFmString = "---\n";
             newFmString += `aliases: [${Array.from(allAliases).map(a => `"${a.replace(/"/g, '\\"')}"`).join(', ')}]\n`;
-            if (existingTags.size > 0) {
-                newFmString += `tags: [${Array.from(existingTags).map(t => `"${t}"`).join(', ')}]\n`;
-            }
+            newFmString += `tags: [${Array.from(existingTags).map(t => `"${t}"`).join(', ')}]\n`;
             newFmString += "---\n";
-
-            // 2C: Rebuild the "Used By" table markdown string from the merged rows
+    
             let clientTableMd = "";
             if (allRows.size > 0) {
                 clientTableMd += `| Primary Processor | Processing Function | Location | Source URL |\n`;
@@ -2065,20 +2409,49 @@ export default class ProcessorProcessorPlugin extends Plugin {
                     clientTableMd += `|${row}|\n`;
                 });
             }
-
-            // 2D: Replace the "Used By" section within the isolated body
+    
             const finalBody = this.ensureHeadingAndSection(survivorBody, "Used By", clientTableMd, null, null);
-
-            // 2E: Assemble the final, complete content
-            const finalContent = newFmString + finalBody;
-
-            // --- Step 3: Write the final content back to the survivor file ---
+            let finalContent = newFmString + finalBody;
+    
+            // <-- NEW: Create the detailed merge record for the survivor's analysis log.
+            const logDate = new Date().toISOString();
+            const survivorLogPath = `${this.settings.analysisLogsFolderPath}/${this.sanitizeNameForFilePathAndAlias(survivorFile.basename).filePathName} Subprocessor Logs.md`;
+            
+            let mergeLogContent = `
+    ---
+    ### Deduplication Merge Event
+    **Date:** ${logDate}
+    **Survivor:** [[${survivorFile.path}|${survivorFile.basename}]]
+    **RightBrain Reasoning:** ${resultSet.reasoning || "No reasoning provided."}
+    
+    **Archived Files (${resultSet.duplicate_file_paths.length}):**
+    `;
+            for (const dupFilePath of resultSet.duplicate_file_paths) {
+                 const archivedPath = `${archiveFolderPath}/${dupFilePath.split('/').pop()}`;
+                 mergeLogContent += `- [[${archivedPath}]]\n`;
+            }
+            await this.writeResultsToObsidianNote(survivorLogPath, mergeLogContent, 'ensure_exists_and_append', survivorFile.basename);
+    
+            // <-- NEW: Create and append the collapsible summary block to the survivor file itself.
+            let mergeSummaryBlock = `
+    <details>
+    <summary>Merge History</summary>
+    
+    This note was the result of an automated deduplication event on ${new Date().toLocaleDateString()}.
+    - **RightBrain Reasoning:** ${resultSet.reasoning || "N/A"}
+    - For a full audit, see the [[${survivorLogPath}|Analysis Log]].
+    
+    </details>
+    `;
+            finalContent += `\n\n${mergeSummaryBlock}`;
+    
+            // --- Step 3: Write the final, enhanced content back to the survivor file ---
             await this.app.vault.modify(survivorFile, finalContent);
             
             mergeCount++;
             new Notice(`Merged ${resultSet.duplicate_file_paths.length} duplicate(s) into ${survivorFile.basename}.`);
         }
-
+    
         if (mergeCount > 0) {
             new Notice(`Deduplication finished. ${mergeCount} merge operations performed.`);
         } else {
@@ -2316,6 +2689,57 @@ export default class ProcessorProcessorPlugin extends Plugin {
                 this.processManualMerge(survivor, duplicates);
             }).open();
         }).open();
+    }
+
+        /**
+     * Writes a pre-defined configuration to the graph.json file.
+     */
+    async applyRecommendedGraphSettings() {
+        // Define our ideal graph settings
+        const graphSettings = {
+            "collapse-filter": true,
+            "search": `path:"${processorsPath}" -path:"${processorsPath}/_Archive"`, 
+            "showTags": false,
+            "showAttachments": false,
+            "hideUnresolved": true,
+            "showOrphans": false,
+            "collapse-color-groups": true,
+            "colorGroups": [
+                {
+                "query": "tag:#processor",
+                "color": { "a": 1, "rgb": 14025728 } // Red
+                },
+                {
+                "query": "tag:#subprocessor",
+                "color": { "a": 1, "rgb": 6084182 } // Green
+                },
+                {
+                "query": "tag:#merged-processor",
+                "color": { "a": 1, "rgb": 6069962 } // Blue
+                }
+            ],
+            "collapse-display": false,
+            "showArrow": true, // Show link direction
+            "textFadeMultiplier": -2.3,
+            "nodeSizeMultiplier": 1.2,
+            "lineSizeMultiplier": 1,
+            "collapse-forces": false,
+            "centerStrength": 0.5,
+            "repelStrength": 12,
+            "linkStrength": 1,
+            "linkDistance": 250,
+            "scale": 0.5,
+            "close": false
+        };
+
+        const configPath = this.app.vault.configDir + '/graph.json';
+        try {
+            await this.app.vault.adapter.write(configPath, JSON.stringify(graphSettings, null, 2));
+            new Notice("Recommended graph settings have been applied. Please reopen the graph view to see the changes.");
+        } catch (error) {
+            console.error("Failed to write graph settings:", error);
+            new Notice("Error: Could not apply graph settings.");
+        }
     }
 
 
@@ -2575,6 +2999,36 @@ class ForceMergeModal extends Modal {
     }
 }
 
+class ConfirmationModal extends Modal {
+    constructor(app: App, private onConfirm: () => void) {
+        super(app);
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+        contentEl.createEl('h2', { text: 'Overwrite Graph Settings?' });
+        contentEl.createEl('p', { text: 'This will replace your current global graph view settings with the recommended configuration for this plugin. Your existing settings will be lost.' });
+
+        new Setting(contentEl)
+            .addButton(btn => btn
+                .setButtonText('Cancel')
+                .onClick(() => {
+                    this.close();
+                }))
+            .addButton(btn => btn
+                .setButtonText('Yes, Overwrite')
+                .setCta() // Makes the button stand out
+                .onClick(() => {
+                    this.onConfirm();
+                    this.close();
+                }));
+    }
+
+    onClose() {
+        this.contentEl.empty();
+    }
+}
+
 class FileSelectorMergeModal extends Modal {
     files: TFile[];
     onSubmit: (selectedFiles: TFile[]) => void;
@@ -2702,7 +3156,6 @@ class PasteEnvModal extends Modal {
             }
         }
     
-        // Check if we found all the keys we need
         if (!settingsToUpdate.rightbrainOrgId || !settingsToUpdate.rightbrainProjectId || !settingsToUpdate.rightbrainClientId || !settingsToUpdate.rightbrainClientSecret || !settingsToUpdate.rightbrainApiUrl || !settingsToUpdate.rightbrainOauth2Url) {
             new Notice("Setup failed. Pasted text is missing one or more required values.", 7000);
             return;
@@ -2710,12 +3163,13 @@ class PasteEnvModal extends Modal {
         
         this.plugin.settings = Object.assign(this.plugin.settings, settingsToUpdate);
         await this.plugin.saveSettings();
-        new Notice(`Successfully updated credentials.`);
+        new Notice(`Credentials saved.`);
     
-        // --- Part 2: Call the Task Setup Logic with the new values ---
         await new Promise(resolve => setTimeout(resolve, 1000));
         
-        // Pass the newly parsed credentials directly to the setup function
+        // --- FIX IS HERE: ---
+        // Just call the setup function and let it run. It handles its own success/fail notices.
+        // We no longer check for a return value here.
         await this.plugin.setupRightBrainTasks({
             apiUrl: settingsToUpdate.rightbrainApiUrl,
             oauthUrl: settingsToUpdate.rightbrainOauth2Url,
@@ -2724,6 +3178,8 @@ class PasteEnvModal extends Modal {
             orgId: settingsToUpdate.rightbrainOrgId,
             projectId: settingsToUpdate.rightbrainProjectId
         });
+
+        await this.plugin.applyRecommendedGraphSettings();
     }
 }
 
@@ -2758,6 +3214,17 @@ class ProcessorProcessorSettingTab extends PluginSettingTab {
         // --- RightBrain Configuration ---
         containerEl.createEl('h3', { text: 'RightBrain Task Configuration' });
 
+        new Setting(containerEl)
+            .setName('Automatically Synchronize Tasks on Load')
+            .setDesc('If enabled, the plugin will check for and apply updates from its local task definitions on startup. Disable this if you prefer to manage and customize your tasks directly in the RightBrain dashboard without them being overwritten.')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.autoSynchronizeTasks)
+                .onChange(async (value) => {
+                    this.plugin.settings.autoSynchronizeTasks = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        
         new Setting(containerEl)
             .setName('RB Extract Entities: Input Field Name')
             .setDesc('The parameter name your RB Extract Entities task expects for the input text (e.g., "page_text", "document_content").')
@@ -2880,5 +3347,79 @@ class ProcessorProcessorSettingTab extends PluginSettingTab {
                     this.plugin.settings.analysisLogsFolderPath = value || DEFAULT_SETTINGS.analysisLogsFolderPath;
                     await this.plugin.saveSettings();
                 }));
+
+        containerEl.createEl('h2', { text: 'RightBrain Model Configuration' });
+
+        // --- THIS IS THE CORRECTED BLOCK ---
+        new Setting(containerEl)
+            .setDesc((() => {
+                // Determine the correct dashboard URL from the saved API URL.
+                const apiUrl = this.plugin.settings.rightbrainApiUrl || '';
+                const dashboardUrl = (apiUrl.includes('stag') || apiUrl.includes('leftbrain'))
+                    ? 'https://stag.leftbrain.me'
+                    : 'https://app.rightbrain.ai';
+
+                // We build the description inside a DocumentFragment to include a link.
+                const fragment = new DocumentFragment();
+                fragment.appendText('You can configure basic RightBrain settings here, or log in to the ');
+                fragment.createEl('a', {
+                    text: 'Rightbrain Dashboard',
+                    href: dashboardUrl,
+                    attr: { 'target': '_blank', 'rel': 'noopener noreferrer' } // Added rel for security
+                });
+                fragment.appendText(' for more fine-tuned control.');
+                return fragment;
+            })());        
+
+        new Setting(containerEl)
+            .setName("Refresh Model List")
+            .setDesc("Fetch the latest available LLM models from your RightBrain project. The list is automatically cached for 24 hours.")
+            .addButton(button => button
+                .setButtonText("Refresh Now")
+                .onClick(async () => {
+                    await this.plugin.updateLlmModelList(true);
+                    // Force a redraw of the settings tab to update the dropdowns
+                    this.display(); 
+                }));
+
+        const taskDefsForUI = [
+            { name: "Verify Subprocessor List URL", settingKey: "verifyUrlModelId" },
+            { name: "Extract Entities From Page Content", settingKey: "extractEntitiesModelId" },
+            { name: "Deduplicate Subprocessors", settingKey: "deduplicateSubprocessorsModelId" },
+            { name: "DDG SERP Parser", settingKey: "duckDuckGoSearchModelId" },
+            { name: "Find DPA URL", settingKey: "findDpaModelId" },
+            { name: "Find ToS URL", settingKey: "findTosModelId" },
+            { name: "Find Security Page URL", settingKey: "findSecurityModelId" }
+        ];
+
+        const availableModels = this.plugin.settings.llmModelList;
+        const defaultModel = availableModels.find(m => m.alias.toLowerCase().includes('gemini 1.5 flash'));
+
+        taskDefsForUI.forEach(task => {
+            new Setting(containerEl)
+                .setName(task.name)
+                .setDesc(`Select the LLM to use for the "${task.name}" task.`)
+                .addDropdown(dropdown => {
+                    if (availableModels.length === 0) {
+                        dropdown.addOption('', 'No models loaded. Refresh list or check credentials.');
+                        dropdown.setDisabled(true);
+                        return;
+                    }
+
+                    availableModels.forEach(model => {
+                        dropdown.addOption(model.id, model.alias);
+                    });
+
+                    // Set value to the saved setting, or the default model, or the first model
+                    const currentModelId = (this.plugin.settings as any)[task.settingKey];
+                    dropdown.setValue(currentModelId || (defaultModel ? defaultModel.id : availableModels[0].id));
+
+                    dropdown.onChange(async (value) => {
+                        (this.plugin.settings as any)[task.settingKey] = value;
+                        await this.plugin.saveSettings();
+                        new Notice(`${task.name} will now use ${dropdown.selectEl.options[dropdown.selectEl.selectedIndex].text}.`);
+                    });
+                });
+        });
     }
 }
