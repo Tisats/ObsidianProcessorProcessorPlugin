@@ -1,6 +1,6 @@
 # Processor Processor for Obsidian
 
-![version](https://img.shields.io/badge/version-1.0.3-blue)
+![version](https://img.shields.io/badge/version-1.0.0-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
 For anyone involved in vendor risk management, mapping out subprocessor relationships can be a complex and time-consuming task. This plugin is a powerful, specialized tool designed to automate and streamline that process.
