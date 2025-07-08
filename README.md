@@ -3,7 +3,7 @@
 ![version](https://img.shields.io/badge/version-1.0.0-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
-For anyone involved in vendor risk management, mapping out subprocessor relationships can be a complex and time-consuming task. This plugin is a powerful, specialized tool designed to automate and streamline that process.
+For anyone involved in vendor risk management, mapping out subprocessor relationships can be a complex and time-consuming task. This plugin is a specialized tool designed to automate and streamline that process.
 
 Processor Processor acts as your AI-powered co-pilot to discover, map, enrich, and document the relationships between data processors and their subprocessors, all directly within your Obsidian vault. This is the first release, and your feedback is greatly appreciated!
 
@@ -66,8 +66,9 @@ Please be aware that your `Client Secret` is stored in plaintext in this file. T
 * **AI-Powered Verification & Extraction:** Uses RightBrain to verify if a URL is a genuine, current subprocessor list and then extracts the names of all third-party vendors and internal company affiliates.
 * **Automated Note Creation & Linking:** Creates a central, linked note for each processor and subprocessor. A processor's note lists its subprocessors; a subprocessor's note lists who it's "Used By."
 * **Visualize Your Supply Chain:** Because all notes are inter-linked, you can use Obsidian's native Graph View to get an instant, interactive map of your vendor relationships. This makes complex data supply chains easier to understand and allows you to dive in and out of particular nodes of interest.
-* **AI-Powered Deduplication:** Run a command on your processors folder to find and merge duplicate entities, combining their relationships automatically.
+* **AI-Powered Deduplication:** Run a command on your processors folder to find and merge duplicate entities, combining their relationships automatically. Duplicate files are safely archived with version numbers to prevent data loss, and all references are automatically updated to maintain link integrity.
 * **Compliance Document Enrichment:** Right-click any processor file to automatically find and link to that company's public DPA, Terms of Service, and Security pages.
+* **Interactive Graph Visualization:** Use Obsidian's native Graph View to visualize your supply chain relationships with color-coded nodes (processors in red, subprocessors in green) and smart filtering. Run **`Apply Recommended Graph Settings`** from the command palette to optimize the graph view for processor relationship visualization.
 
 ---
 
@@ -118,6 +119,8 @@ The `Complete First-Time Setup` command handles all essential configuration. How
 * **Mapping Depth:** The maximum number of levels the recursive mapping will traverse. **Warning:** Setting this to a high number (e.g., above 3) can result in very long processing times and a large number of API calls. It is strongly recommended to start with a depth of 2 or 3.
 * **Discovery Cache Duration:** How many days to consider a processor's data "fresh" before re-analyzing it in a recursive run.
 * **Folder Paths:** Change the default `Processors` and `Analysis Logs` folder locations.
+* **LLM Model Selection:** Choose which AI model to use for each task (verification, extraction, deduplication, etc.). The plugin automatically fetches available models from your RightBrain project and allows you to select the best model for each specific task.
+* **RightBrain Dashboard Access:** All the underlying AI tasks created by the plugin can be viewed, modified, and fine-tuned directly in your [RightBrain dashboard](https://app.rightbrain.ai). This gives you full control over the AI prompts, output formats, and task configurations if you want to customize the behaviour beyond the plugin's settings.
 
 ---
 

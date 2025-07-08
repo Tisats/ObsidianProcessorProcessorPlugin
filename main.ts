@@ -1,4 +1,4 @@
-import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, requestUrl, TFile, Menu, MenuItem, FrontMatterCache, TFolder, TextComponent, TextAreaComponent, ButtonComponent } from 'obsidian';
+import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, requestUrl, TFile, Menu, MenuItem, TFolder, TextAreaComponent, ButtonComponent } from 'obsidian';
 
 // ----- CONSTANTS -----
 const SUBPROCESSOR_URL_KEYWORDS = [
@@ -379,7 +379,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
      * Updates the cached list of LLM models if the cache is stale or if forced.
      * @param force - If true, bypasses the cache check.
      */
-    async updateLlmModelList(force: boolean = false): Promise<void> {
+    async updateLlmModelList(force = false): Promise<void> {
         const now = Date.now();
         const cacheDuration = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -850,7 +850,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
         }
     }
 
-    async persistSubprocessorInfo(processorName: string, processorFile: TFile, searchData: SearchData, isTopLevelProcessor: boolean = true, mergeDecisions: string[] = []) {
+    async persistSubprocessorInfo(processorName: string, processorFile: TFile, searchData: SearchData, isTopLevelProcessor = true, mergeDecisions: string[] = []) {
         new Notice(`Persisting info for: ${processorName}...`);
         await this.ensureFolderExists(this.settings.processorsFolderPath);
         await this.ensureFolderExists(this.settings.analysisLogsFolderPath);
@@ -1148,7 +1148,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
             title: `Manually Provided List for ${processorName}`, url: listUrl,
             snippet: 'Manually provided URL', processorName: processorName, documentType: 'direct_input_list',
         };
-        let currentProcessedUrlInfo: ProcessedUrlInfo = { ...directUrlInfoBase, url: listUrl, documentType: 'direct_input_list' };
+        const currentProcessedUrlInfo: ProcessedUrlInfo = { ...directUrlInfoBase, url: listUrl, documentType: 'direct_input_list' };
 
 
         const rbToken = await this.getRightBrainAccessToken();
@@ -1295,7 +1295,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
         }
     }
 
-    private async ensureProcessorFile(originalProcessorName: string, addFrontmatter: boolean = false, isTopLevelProcessor: boolean = true): Promise<TFile | null> {
+    private async ensureProcessorFile(originalProcessorName: string, addFrontmatter = false, isTopLevelProcessor = true): Promise<TFile | null> {
         await this.ensureFolderExists(this.settings.processorsFolderPath);
         const { filePathName, originalNameAsAlias } = this.sanitizeNameForFilePathAndAlias(originalProcessorName);
         const folder = this.settings.processorsFolderPath.startsWith('/') ? this.settings.processorsFolderPath.substring(1) : this.settings.processorsFolderPath;
@@ -1307,7 +1307,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
                 let initialContent = "";
                 if (addFrontmatter) {
                     const tag = isTopLevelProcessor ? 'processor' : 'subprocessor';
-                    const aliasForFrontmatter = originalNameAsAlias.replace(/[:\[\],"]/g, ''); 
+                    const aliasForFrontmatter = originalNameAsAlias.replace(/[:[\]",]/g, ''); 
                     initialContent = `---\ntags: [${tag}]\naliases: ["${aliasForFrontmatter}"]\n---\n\n# ${originalNameAsAlias}\n\n`;
                 } else {
                     initialContent = `# ${originalNameAsAlias}\n\n`; 
@@ -1322,7 +1322,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
         }
         if (file && addFrontmatter) {
             const tag = isTopLevelProcessor ? 'processor' : 'subprocessor';
-            const aliasForFrontmatter = originalNameAsAlias.replace(/[:\[\],"]/g, '');
+            const aliasForFrontmatter = originalNameAsAlias.replace(/[:[\]",]/g, '');
             await this.app.vault.process(file, (content) => {
                 let newContent = this.updateFrontmatter(content, { tags: [tag], aliases: [aliasForFrontmatter] }, originalNameAsAlias);
                 if (!newContent.trim().includes(`# ${originalNameAsAlias}`)) {
@@ -1370,7 +1370,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
         const { filePathName: logFilePathNamePart } = this.sanitizeNameForFilePathAndAlias(originalProcessorName);
         const analysisLogsFolder = this.settings.analysisLogsFolderPath; // Normalized
         const logFileName = `${logFilePathNamePart} Subprocessor Logs.md`;
-        const logFileLinkTarget = encodeURI(`${analysisLogsFolder}/${logFileName}`); // Use sanitized name for log file link
+                    // const logFileLinkTarget = encodeURI(`${analysisLogsFolder}/${logFileName}`); // Use sanitized name for log file link
         const logFileLink = `[[${analysisLogsFolder}/${logFileName}|${originalProcessorName} Subprocessor Logs]]`; // Obsidian link to log
         const analysisLogSection = `\n- ${logFileLink}\n`;
 
@@ -1590,8 +1590,8 @@ export default class ProcessorProcessorPlugin extends Plugin {
             // Heading found
             const headingLevel = headingMatch[1].length; // e.g., "##" -> length 2
             const nextHeadingRegex = new RegExp(`^#{1,${headingLevel}}\\s+.*(\\s*\\n|$)`, "im");
-            let startIndexAfterHeading = headingMatch.index! + headingMatch[0].length;
-            let contentAfterHeading = content.substring(startIndexAfterHeading);
+            const startIndexAfterHeading = headingMatch.index! + headingMatch[0].length;
+            const contentAfterHeading = content.substring(startIndexAfterHeading);
             let endIndex = content.length; // Default to end of content
 
             // Find where the current section ends (start of next heading of same or higher level, or end of doc)
@@ -1909,7 +1909,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
     }
 
 
-    private isValidUrl(url: string, processorNameContext: string = ""): boolean {
+    private isValidUrl(url: string, processorNameContext = ""): boolean {
         if (!url || typeof url !== 'string') return false;
         try {
             const parsedUrl = new URL(url);
@@ -1967,7 +1967,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
         const linkRegex = /<a\s+(?:[^>]*?\s+)?href="([^"]*)"/gi;
         let match;
         while ((match = linkRegex.exec(pageContent)) !== null) {
-            let href = match[1].trim();
+            const href = match[1].trim();
             if (href && !href.startsWith('#') && !href.startsWith('mailto:') && !href.startsWith('javascript:')) {
                 try {
                     const absoluteUrl = new URL(href, pageUrl).toString(); // Resolve relative URLs
@@ -2188,7 +2188,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
                 
                 for (const alias of new Set(aliases)) {
                     if (alias) {
-                        aliasMap.set(alias, { path: file.path, canonicalName });
+                        aliasMap.set(alias as string, { path: file.path, canonicalName: canonicalName });
                     }
                 }
             }
@@ -2365,21 +2365,33 @@ export default class ProcessorProcessorPlugin extends Plugin {
             const archiveFolderPath = `${this.settings.processorsFolderPath}/_Archive`;
             await this.ensureFolderExists(archiveFolderPath);
     
+                        // Track archived files for link updates
+            const archivedFiles: { originalPath: string, archivedPath: string }[] = [];
+            
             for (const dupFilePath of resultSet.duplicate_file_paths) {
                 if (dupFilePath === survivorFile.path) continue;
                 const dupFile = this.app.vault.getAbstractFileByPath(dupFilePath) as TFile;
                 if (dupFile) {
                     const dupContent = await this.app.vault.read(dupFile);
                     const dupCache = this.app.metadataCache.getFileCache(dupFile);
-    
-                    (dupCache?.frontmatter?.aliases || []).map(String).forEach(alias => allAliases.add(alias));
+
+                    (dupCache?.frontmatter?.aliases || []).map(String).forEach((alias: string) => allAliases.add(alias));
                     allAliases.add(dupFile.basename);
                     this.extractClientTableRows(dupContent).forEach(row => allRows.add(row));
                     
                     try {
-                        // <-- NEW: Move the duplicate file to an archive folder instead of deleting it.
-                        const newPath = `${archiveFolderPath}/${dupFile.name}`;
-                        await this.app.vault.rename(dupFile, newPath);
+                        // Generate unique archive path with version number
+                        let archivePath = `${archiveFolderPath}/${dupFile.name}`;
+                        let counter = 1;
+                        while (this.app.vault.getAbstractFileByPath(archivePath)) {
+                            const nameWithoutExt = dupFile.basename;
+                            const ext = dupFile.extension;
+                            archivePath = `${archiveFolderPath}/${nameWithoutExt} (v${counter}).${ext}`;
+                            counter++;
+                        }
+                        
+                        await this.app.vault.rename(dupFile, archivePath);
+                        archivedFiles.push({ originalPath: dupFilePath, archivedPath: archivePath });
                     } catch (e) {
                         console.error(`Failed to move duplicate file ${dupFilePath} to archive:`, e);
                     }
@@ -2390,7 +2402,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
     
             const fmRegex = /^---\s*\n([\s\S]*?)\n---\s*\n/;
             const match = originalSurvivorContent.match(fmRegex);
-            let survivorBody = match ? originalSurvivorContent.substring(match[0].length) : originalSurvivorContent;
+            const survivorBody = match ? originalSurvivorContent.substring(match[0].length) : originalSurvivorContent;
     
             const existingTags = new Set<string>((survivorCache?.frontmatter?.tags || []).map(String));
             // <-- NEW: Add a 'merged-processor' tag for easy searching.
@@ -2433,7 +2445,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
             await this.writeResultsToObsidianNote(survivorLogPath, mergeLogContent, 'ensure_exists_and_append', survivorFile.basename);
     
             // <-- NEW: Create and append the collapsible summary block to the survivor file itself.
-            let mergeSummaryBlock = `
+            const mergeSummaryBlock = `
     <details>
     <summary>Merge History</summary>
     
@@ -2447,6 +2459,11 @@ export default class ProcessorProcessorPlugin extends Plugin {
     
             // --- Step 3: Write the final, enhanced content back to the survivor file ---
             await this.app.vault.modify(survivorFile, finalContent);
+            
+            // --- Step 4: Update all references to the archived files ---
+            if (archivedFiles.length > 0) {
+                await this.updateFileReferences(archivedFiles);
+            }
             
             mergeCount++;
             new Notice(`Merged ${resultSet.duplicate_file_paths.length} duplicate(s) into ${survivorFile.basename}.`);
@@ -2481,7 +2498,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
                 const dupCache = this.app.metadataCache.getFileCache(dupFile);
                 
                 // Add duplicate's aliases and basename to the set
-                (dupCache?.frontmatter?.aliases || []).map(String).forEach(alias => allAliases.add(alias));
+                (dupCache?.frontmatter?.aliases || []).map(String).forEach((alias: string) => allAliases.add(alias));
                 allAliases.add(dupFile.basename);
                 
                 // Add duplicate's "Used By" table rows to the set
@@ -2491,7 +2508,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
             // --- Step 2: Rebuild the survivor file with merged data ---
             const fmRegex = /^---\s*\n([\s\S]*?)\n---\s*\n/;
             const match = originalSurvivorContent.match(fmRegex);
-            let survivorBody = match ? originalSurvivorContent.substring(match[0].length) : originalSurvivorContent;
+            const survivorBody = match ? originalSurvivorContent.substring(match[0].length) : originalSurvivorContent;
 
             // Rebuild frontmatter
             const existingTags = new Set<string>((survivorCache?.frontmatter?.tags || []).map(String));
@@ -2516,11 +2533,38 @@ export default class ProcessorProcessorPlugin extends Plugin {
             const finalBody = this.ensureHeadingAndSection(survivorBody, "Used By", clientTableMd, null, null);
             const finalContent = newFmString + finalBody;
 
-            // --- Step 3: Write to survivor and delete duplicates ---
+            // --- Step 3: Write to survivor and archive duplicates ---
             await this.app.vault.modify(survivorFile, finalContent);
             
+            // Archive duplicates instead of deleting them
+            const archiveFolderPath = `${this.settings.processorsFolderPath}/_Archive`;
+            await this.ensureFolderExists(archiveFolderPath);
+            const archivedFiles: { originalPath: string, archivedPath: string }[] = [];
+            
             for (const dupFile of duplicateFiles) {
-                await this.app.vault.delete(dupFile);
+                try {
+                    // Generate unique archive path with version number
+                    let archivePath = `${archiveFolderPath}/${dupFile.name}`;
+                    let counter = 1;
+                    while (this.app.vault.getAbstractFileByPath(archivePath)) {
+                        const nameWithoutExt = dupFile.basename;
+                        const ext = dupFile.extension;
+                        archivePath = `${archiveFolderPath}/${nameWithoutExt} (v${counter}).${ext}`;
+                        counter++;
+                    }
+                    
+                    await this.app.vault.rename(dupFile, archivePath);
+                    archivedFiles.push({ originalPath: dupFile.path, archivedPath: archivePath });
+                } catch (e) {
+                    console.error(`Failed to archive duplicate file ${dupFile.path}:`, e);
+                    // Fallback to deletion if archiving fails
+                    await this.app.vault.delete(dupFile);
+                }
+            }
+            
+            // Update references to archived files
+            if (archivedFiles.length > 0) {
+                await this.updateFileReferences(archivedFiles);
             }
 
             new Notice(`Successfully merged ${duplicateFiles.length} file(s) into ${survivorFile.basename}.`);
@@ -2580,8 +2624,49 @@ export default class ProcessorProcessorPlugin extends Plugin {
         return rows;
     }
 
+    /**
+     * Updates all file references in the vault when files are moved during deduplication.
+     * This prevents broken links by updating all Obsidian links and file references.
+     */
+    private async updateFileReferences(archivedFiles: { originalPath: string, archivedPath: string }[]): Promise<void> {
+        const allFiles = this.app.vault.getMarkdownFiles();
+        
+        for (const file of allFiles) {
+            let content = await this.app.vault.read(file);
+            let contentChanged = false;
+            
+            for (const { originalPath, archivedPath } of archivedFiles) {
+                const originalName = originalPath.split('/').pop()?.replace('.md', '') || '';
+                const archivedName = archivedPath.split('/').pop()?.replace('.md', '') || '';
+                
+                // Update Obsidian links: [[path|text]] or [[path]]
+                const linkRegex = new RegExp(`\\[\\[${originalPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\|[^\\]]*)?\\]\\]`, 'g');
+                if (linkRegex.test(content)) {
+                    content = content.replace(linkRegex, (match, pipeAndText) => {
+                        const newLink = `[[${archivedPath}${pipeAndText || ''}]]`;
+                        contentChanged = true;
+                        return newLink;
+                    });
+                }
+                
+                // Update file name references in text (for cases where just the name is mentioned)
+                const nameRegex = new RegExp(`\\b${originalName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g');
+                if (nameRegex.test(content)) {
+                    content = content.replace(nameRegex, (match) => {
+                        contentChanged = true;
+                        return `${match} (archived)`;
+                    });
+                }
+            }
+            
+            if (contentChanged) {
+                await this.app.vault.modify(file, content);
+            }
+        }
+    }
 
-    async discoverRecursively(initialProcessorName: string, initialProcessorFile?: TFile, maxDepth: number = 3) {
+
+    async discoverRecursively(initialProcessorName: string, initialProcessorFile?: TFile, maxDepth = 3) {
         new Notice(`Starting smart recursive discovery for: ${initialProcessorName}. Max depth: ${maxDepth}`, 10000);
 
         const aliasMap = await this.buildAliasMap();
@@ -2594,7 +2679,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
             const current = queue.shift();
             if (!current) continue;
     
-            let { processorName, depth } = current;
+            const { processorName, depth } = current;
     
             // --- State-Aware Processing Check ---
             const existingEntity = aliasMap.get(processorName.toLowerCase());
@@ -2747,9 +2832,9 @@ export default class ProcessorProcessorPlugin extends Plugin {
 
 // ----- MODAL CLASSES -----
 class ManualInputModal extends Modal {
-    processorName: string = '';
-    listUrl: string = '';
-    isPrimaryProcessor: boolean = true; // <-- New state variable, defaults to true
+    processorName = '';
+    listUrl = '';
+    isPrimaryProcessor = true; // <-- New state variable, defaults to true
     onSubmit: (processorName: string, listUrl: string, isPrimary: boolean) => Promise<void>; // <-- Updated signature
     initialProcessorName?: string;
 
@@ -2814,7 +2899,7 @@ class ManualInputModal extends Modal {
 }
 
 class SearchModal extends Modal {
-    processorName: string = '';
+    processorName = '';
     settings: ProcessorProcessorSettings; // To inform user about search method
     onSubmit: (processorName: string) => Promise<void>;
 
@@ -2868,9 +2953,9 @@ class SearchModal extends Modal {
 }
 
 class ManualTextEntryModal extends Modal {
-    processorName: string = '';
-    pastedText: string = '';
-    isPrimaryProcessor: boolean = true; // <-- New state variable, defaults to true
+    processorName = '';
+    pastedText = '';
+    isPrimaryProcessor = true; // <-- New state variable, defaults to true
     onSubmit: (processorName: string, pastedText: string, isPrimary: boolean) => Promise<void>; // <-- Updated signature
     initialProcessorName?: string;
 
@@ -2970,7 +3055,7 @@ class ForceMergeModal extends Modal {
             radio.onchange = () => {
                 this.survivor = file;
                 // This correctly enables the merge button
-                mergeButton.setDisabled(false).setCta(true);
+                mergeButton.setDisabled(false).setCta();
             };
     
             setting.controlEl.appendChild(radio);
@@ -2999,35 +3084,35 @@ class ForceMergeModal extends Modal {
     }
 }
 
-class ConfirmationModal extends Modal {
-    constructor(app: App, private onConfirm: () => void) {
-        super(app);
-    }
+// class ConfirmationModal extends Modal {
+//     constructor(app: App, private onConfirm: () => void) {
+//         super(app);
+//     }
 
-    onOpen() {
-        const { contentEl } = this;
-        contentEl.createEl('h2', { text: 'Overwrite Graph Settings?' });
-        contentEl.createEl('p', { text: 'This will replace your current global graph view settings with the recommended configuration for this plugin. Your existing settings will be lost.' });
+//     onOpen() {
+//         const { contentEl } = this;
+//         contentEl.createEl('h2', { text: 'Overwrite Graph Settings?' });
+//         contentEl.createEl('p', { text: 'This will replace your current global graph view settings with the recommended configuration for this plugin. Your existing settings will be lost.' });
 
-        new Setting(contentEl)
-            .addButton(btn => btn
-                .setButtonText('Cancel')
-                .onClick(() => {
-                    this.close();
-                }))
-            .addButton(btn => btn
-                .setButtonText('Yes, Overwrite')
-                .setCta() // Makes the button stand out
-                .onClick(() => {
-                    this.onConfirm();
-                    this.close();
-                }));
-    }
+//         new Setting(contentEl)
+//             .addButton(btn => btn
+//                 .setButtonText('Cancel')
+//                 .onClick(() => {
+//                     this.close();
+//                 }))
+//             .addButton(btn => btn
+//                 .setButtonText('Yes, Overwrite')
+//                 .setCta() // Makes the button stand out
+//                 .onClick(() => {
+//                     this.onConfirm();
+//                     this.close();
+//                 }));
+//     }
 
-    onClose() {
-        this.contentEl.empty();
-    }
-}
+//     onClose() {
+//         this.contentEl.empty();
+//     }
+// }
 
 class FileSelectorMergeModal extends Modal {
     files: TFile[];
@@ -3088,7 +3173,7 @@ class FileSelectorMergeModal extends Modal {
 }
 
 class PasteEnvModal extends Modal {
-    pastedText: string = '';
+    pastedText = '';
     plugin: ProcessorProcessorPlugin;
 
     constructor(app: App, plugin: ProcessorProcessorPlugin) {
@@ -3148,7 +3233,7 @@ class PasteEnvModal extends Modal {
             const parts = line.split('=');
             if (parts.length < 2) continue;
             const key = parts[0].trim();
-            let value = parts.slice(1).join('=').trim().replace(/["']/g, '');
+            const value = parts.slice(1).join('=').trim().replace(/["']/g, '');
     
             if (key in keyMap && value) {
                 const settingKey = keyMap[key];
