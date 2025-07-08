@@ -1,6 +1,6 @@
 {
 	"name": "processor-processor",
-	"version": "1.0.2",
+	"version": "1.0.0",
 	"description": "This is a sample plugin for Obsidian (https://obsidian.md)",
 	"keywords": [],
 	"homepage": "https://github.com/Tisats/ObsidianProcessorProcessorPlugin#readme",
