@@ -2372,7 +2372,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
                     const dupContent = await this.app.vault.read(dupFile);
                     const dupCache = this.app.metadataCache.getFileCache(dupFile);
     
-                    (dupCache?.frontmatter?.aliases || []).map(String).forEach((alias: string) => allAliases.add(alias))
+                    (dupCache?.frontmatter?.aliases || []).map(String).forEach(alias => allAliases.add(alias));
                     allAliases.add(dupFile.basename);
                     this.extractClientTableRows(dupContent).forEach(row => allRows.add(row));
                     
@@ -2481,7 +2481,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
                 const dupCache = this.app.metadataCache.getFileCache(dupFile);
                 
                 // Add duplicate's aliases and basename to the set
-                (dupCache?.frontmatter?.aliases || []).map(String).forEach((alias: string) => allAliases.add(alias));
+                (dupCache?.frontmatter?.aliases || []).map(String).forEach(alias => allAliases.add(alias));
                 allAliases.add(dupFile.basename);
                 
                 // Add duplicate's "Used By" table rows to the set
@@ -2970,7 +2970,7 @@ class ForceMergeModal extends Modal {
             radio.onchange = () => {
                 this.survivor = file;
                 // This correctly enables the merge button
-                mergeButton.setDisabled(false).setCta();
+                mergeButton.setDisabled(false).setCta(true);
             };
     
             setting.controlEl.appendChild(radio);
