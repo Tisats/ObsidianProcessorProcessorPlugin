@@ -326,11 +326,11 @@ export default class ProcessorProcessorPlugin extends Plugin {
         );
 
         this.addSettingTab(new ProcessorProcessorSettingTab(this.app, this));
-        console.log('Processor Processor plugin loaded.');
+        // Plugin loaded successfully
     }
 
     onunload() {
-        console.log('Processor Processor plugin unloaded.');
+        // Plugin unloaded
     }
 
     async loadSettings() {
@@ -949,13 +949,13 @@ export default class ProcessorProcessorPlugin extends Plugin {
             };
     
             if (this.settings.verboseDebug) {
-                console.log(`Calling RightBrain Task ${searchTaskId} for DDG search. URL: ${duckDuckGoUrl}, Target: ${processorName}`);
+                // Calling RightBrain Task for DDG search
             }
     
             const taskRunResult = await this.callRightBrainTask(searchTaskId, taskInputPayload, rbToken);
     
             if (this.settings.verboseDebug && taskRunResult) {
-                console.log(`Full RightBrain Response for DDG search query "${query}":`, JSON.stringify(taskRunResult, null, 2));
+                // Full RightBrain Response for DDG search query
             }
     
             if (taskRunResult?.response?.search_results && Array.isArray(taskRunResult.response.search_results)) {
@@ -974,7 +974,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
                     }
                 }
                 if (this.settings.verboseDebug) {
-                    console.log(`Successfully processed ${resultsList.length} search results for query "${query}"`);
+                    // Successfully processed search results
                 }
             } else {
                 new Notice(`DDG search via RB for "${query.substring(0, 20)}..." yielded no valid results.`, 3000);
@@ -984,7 +984,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
             }
             await new Promise(resolve => setTimeout(resolve, 700 + Math.random() * 500));
         }
-        if (this.settings.verboseDebug) console.log(`searchViaRightBrainDuckDuckGo collected ${allResults.length} filtered candidates for ${processorName}`);
+                    // searchViaRightBrainDuckDuckGo collected filtered candidates
         return allResults;
     }
 
@@ -1736,7 +1736,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
 
         // Check for the cached token first
         if ((this as any)._rbToken && (this as any)._rbTokenExpiry > Date.now()) {
-            if (this.settings.verboseDebug) console.log("Using cached RightBrain token.");
+            // Using cached RightBrain token
             return (this as any)._rbToken;
         }
 
@@ -1755,7 +1755,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
         };
 
         try {
-            if (this.settings.verboseDebug) console.log("Requesting new RightBrain token.");
+            // Requesting new RightBrain token
             const response = await requestUrl({
                 url: tokenUrl,
                 method: 'POST',
@@ -1765,7 +1765,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
             });
 
             if (response.status === 200 && response.json && response.json.access_token) {
-                if (this.settings.verboseDebug) console.log("Successfully obtained new RightBrain token.");
+                // Successfully obtained new RightBrain token
                 (this as any)._rbToken = response.json.access_token;
                 (this as any)._rbTokenExpiry = Date.now() + (response.json.expires_in || 3600) * 1000 - 600000;
                 return response.json.access_token;
@@ -1877,7 +1877,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
             }
             await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 300)); // Delay between API calls
         }
-        if (this.settings.verboseDebug) console.log(`SerpAPI search for ${processorName} found ${allResults.length} relevant candidates.`);
+                    // SerpAPI search completed
         return allResults;
     }
 
@@ -2026,7 +2026,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
         };
         
         if (this.settings.verboseDebug) {
-            console.log(`[callRightBrainTask] Sending Request to Task ID ${taskId.substring(0,8)}... Payload:`, JSON.stringify(payload, null, 2));
+            // Sending Request to RightBrain Task
         }
         
         try {
@@ -2040,7 +2040,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
     
             if (response.json && (response.status === 200 || response.status === 201)) {
                 if (this.settings.verboseDebug) {
-                    console.log(`[callRightBrainTask] Success for Task ID ${taskId.substring(0,8)}... Full Response:`, JSON.stringify(response.json, null, 2));
+                    // Success for RightBrain Task
                 }
                 return response.json; 
             } else {
@@ -2076,7 +2076,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
         const taskResult = await this.callRightBrainTask(this.settings.rightbrainVerifyUrlTaskId, taskInput, rbToken);
     
         if (this.settings.verboseDebug) {
-            console.log(`RB Verify Task [${this.settings.rightbrainVerifyUrlTaskId}] Full Result for URL ${urlToVerify}:`, JSON.stringify(taskResult, null, 2));
+            // RB Verify Task Full Result
         }
     
         // Process the taskResult
@@ -2109,7 +2109,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
 
     
             if (this.settings.verboseDebug) {
-                console.log(`RB Verify for ${urlToVerify}: List=${isList}, Current=${isCurrent}, Content available: ${!!pageContent}, Content snippet: ${pageContent ? pageContent.substring(0,100) + "..." : "N/A"}`);
+                // RB Verify result processed
             }
             return { isList, isCurrent: (isList && isCurrent), isCorrectProcessor, reasoning, pageContent };
         }
@@ -2187,7 +2187,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
                 aliases.push(file.basename.toLowerCase());
                 
                 for (const alias of new Set(aliases)) {
-                    if (alias) {
+                    if (alias && typeof alias === 'string') {
                         aliasMap.set(alias, { path: file.path, canonicalName });
                     }
                 }
