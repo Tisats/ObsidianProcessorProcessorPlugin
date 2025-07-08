@@ -230,6 +230,50 @@ export default class ProcessorProcessorPlugin extends Plugin {
         });
 
         this.addCommand({
+            id: 'select-default-model',
+            name: 'Select Default Model for All Tasks',
+            callback: async () => {
+                // First ensure we have the latest model list
+                await this.updateLlmModelList(true);
+                
+                if (this.settings.llmModelList.length === 0) {
+                    new Notice("No models available. Please check your RightBrain credentials and try again.");
+                    return;
+                }
+                
+                new ModelSelectionModal(
+                    this.app,
+                    this,
+                    this.settings.llmModelList,
+                    async (selectedModelId) => {
+                        // Update all model settings to use the selected model
+                        const modelSettingKeys = [
+                            'verifyUrlModelId',
+                            'extractEntitiesModelId', 
+                            'deduplicateSubprocessorsModelId',
+                            'duckDuckGoSearchModelId',
+                            'findDpaModelId',
+                            'findTosModelId',
+                            'findSecurityModelId'
+                        ];
+                        
+                        for (const key of modelSettingKeys) {
+                            (this.settings as any)[key] = selectedModelId;
+                        }
+                        
+                        await this.saveSettings();
+                        new Notice(`All tasks will now use ${this.settings.llmModelList.find(m => m.id === selectedModelId)?.alias || selectedModelId}. Synchronizing with RightBrain...`);
+                        
+                        // Sync the changes to RightBrain
+                        setTimeout(() => {
+                            this.synchronizeRightBrainTasks();
+                        }, 1000);
+                    }
+                ).open();
+            }
+        });
+
+        this.addCommand({
             id: 'apply-recommended-graph-settings',
             name: 'Apply Recommended Graph Settings',
             callback: () => {
@@ -660,6 +704,10 @@ export default class ProcessorProcessorPlugin extends Plugin {
             const modelSettingKey = modelSettingKeyMap[localDef.setting_key];
             const userSelectedModelId = modelSettingKey ? (this.settings as any)[modelSettingKey] : null;
 
+            if (this.settings.verboseDebug) {
+                console.log(`Task '${localDef.name}': Setting key: ${modelSettingKey}, User selected model: ${userSelectedModelId}, Default model: ${localDef.llm_model_id}`);
+            }
+
             // Create a clean payload with only the properties needed for a revision.
             const newRevisionPayload: any = {
                 system_prompt: localDef.system_prompt,
@@ -667,7 +715,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
                 output_format: localDef.output_format,
                 input_processors: localDef.input_processors || [],
                 enabled: localDef.enabled,
-                llm_model_id: userSelectedModelId || localDef.llm_model_id
+                llm_model_id: userSelectedModelId || localDef.llm_model_id || null
             };
     
             if (!serverTask) {
@@ -675,13 +723,25 @@ export default class ProcessorProcessorPlugin extends Plugin {
                 const createTaskPayload = { ...newRevisionPayload, name: localDef.name, description: localDef.description };
                 await this.createRightBrainTask(rbToken, createTaskPayload, creds);
             } else {
-                const latestRevision = serverTask.task_revisions?.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+                if (this.settings.verboseDebug) {
+                    console.log(`Server task structure for '${localDef.name}':`, JSON.stringify(serverTask, null, 2));
+                }
+                // Try both possible field names for revisions
+                const revisions = serverTask.task_revisions || serverTask.revisions;
+                const latestRevision = revisions?.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
                 
                 const needsUpdate = !latestRevision ||
                                     latestRevision.system_prompt !== newRevisionPayload.system_prompt ||
                                     latestRevision.user_prompt !== newRevisionPayload.user_prompt ||
                                     latestRevision.llm_model_id !== newRevisionPayload.llm_model_id ||
                                     JSON.stringify(latestRevision.output_format) !== JSON.stringify(newRevisionPayload.output_format);
+
+                if (this.settings.verboseDebug) {
+                    console.log(`Task '${localDef.name}': Current model: ${latestRevision?.llm_model_id}, New model: ${newRevisionPayload.llm_model_id}, Needs update: ${needsUpdate}`);
+                    if (latestRevision?.llm_model_id !== newRevisionPayload.llm_model_id) {
+                        console.log(`Model change detected for '${localDef.name}': ${latestRevision?.llm_model_id} -> ${newRevisionPayload.llm_model_id}`);
+                    }
+                }
     
                 if (needsUpdate) {
                     if (this.settings.verboseDebug) console.log(`Task '${localDef.name}' has updates. Creating new revision...`);
@@ -708,6 +768,87 @@ export default class ProcessorProcessorPlugin extends Plugin {
     
         await this.saveSettings();
         new Notice(`RightBrain tasks synchronized successfully. ${tasksPopulated} tasks configured.`, 10000);
+    }
+
+    async setupRightBrainTasksWithModel(creds: { apiUrl: string, oauthUrl: string, clientId: string, clientSecret: string, orgId: string, projectId: string }, defaultModelId: string) {
+        new Notice("Step 1: Verifying tasks on RightBrain...", 4000);
+
+        // Get auth token and load local definitions from the JSON file
+        const rbToken = await this.getRightBrainAccessToken(creds);
+        if (!rbToken) {
+            new Notice("Setup failed: Could not get RightBrain Access Token.");
+            return;
+        }
+
+        let taskDefs: any[]; // Using 'any[]' to easily access the custom 'setting_key' property
+        try {
+            const adapter = this.app.vault.adapter;
+            const pluginDir = this.manifest.dir;
+            const filePath = `${pluginDir}/task_definitions.json`;
+            if (!(await adapter.exists(filePath))) {
+                new Notice("Error: task_definitions.json not found in plugin folder.", 7000);
+                return;
+            }
+            const fileContent = await adapter.read(filePath);
+            taskDefs = JSON.parse(fileContent);
+        } catch (error) {
+            new Notice("Error reading or parsing task_definitions.json. Check console.", 7000);
+            console.error("ProcessorProcessor: Failed to load task definitions from file:", error);
+            return;
+        }
+
+        // --- Step 1: Ensure all tasks from definitions exist on the server, creating any that are missing ---
+        const existingTasks = await this.listAllRightBrainTasks(rbToken, creds);
+        if (existingTasks === null) {
+            new Notice("Setup failed: Could not retrieve existing tasks from RightBrain.");
+            return;
+        }
+        const existingTaskNames = new Set(existingTasks.map((task: any) => task.name));
+
+        for (const taskDef of taskDefs) {
+            if (!existingTaskNames.has(taskDef.name)) {
+                new Notice(`Creating missing task: '${taskDef.name}'...`);
+                // Add the selected model to the task definition
+                const taskDefWithModel = { ...taskDef, llm_model_id: defaultModelId };
+                await this.createRightBrainTask(rbToken, taskDefWithModel, creds);
+                await new Promise(resolve => setTimeout(resolve, 500)); // Pause to prevent rate-limiting
+            }
+        }
+
+        // --- Step 2: Re-fetch the complete list of tasks to get definitive IDs ---
+        new Notice("Step 2: Fetching all task IDs...", 4000);
+        const allServerTasks = await this.listAllRightBrainTasks(rbToken, creds);
+        if (allServerTasks === null) {
+            new Notice("Error: Could not fetch the final list of tasks to save their IDs.");
+            return;
+        }
+
+        // --- Step 3: Create a map of Task Name -> Task ID for easy lookup ---
+        const serverTaskMap = new Map(allServerTasks.map((task: any) => [task.name, task.id]));
+        let tasksPopulated = 0;
+
+        // --- Step 4: Loop through local definitions and populate settings using the map ---
+        for (const taskDef of taskDefs) {
+            const settingKey = taskDef.setting_key as keyof ProcessorProcessorSettings;
+            if (settingKey && serverTaskMap.has(taskDef.name)) {
+                const taskId = serverTaskMap.get(taskDef.name);
+                if (taskId) {
+                    (this.settings as any)[settingKey] = taskId;
+                    tasksPopulated++;
+                }
+            } else {
+                console.warn(`Could not find a matching task on the server for local definition: "${taskDef.name}"`);
+            }
+        }
+        
+        // --- Step 5: Save the fully populated settings object to data.json ---
+        await this.saveSettings();
+        
+        if (tasksPopulated === taskDefs.length) {
+            new Notice(`Success! All ${tasksPopulated} task IDs have been configured and saved.`);
+        } else {
+            new Notice(`Setup finished, but only ${tasksPopulated} of ${taskDefs.length} task IDs could be saved.`);
+        }
     }
 
     async setupRightBrainTasks(creds: { apiUrl: string, oauthUrl: string, clientId: string, clientSecret: string, orgId: string, projectId: string }) {
@@ -794,7 +935,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
      * @param rbToken The RightBrain access token.
      * @returns An array of task objects or null if an error occurs.
      */
-    private async listAllRightBrainTasks(rbToken: string, creds: { apiUrl: string, orgId: string, projectId: string }): Promise<any[] | null> {
+    async listAllRightBrainTasks(rbToken: string, creds: { apiUrl: string, orgId: string, projectId: string }): Promise<any[] | null> {
         // This function now uses the 'creds' object to build the URL
         const tasksUrl = `${creds.apiUrl}/org/${creds.orgId}/project/${creds.projectId}/task`;
         const headers = { 'Authorization': `Bearer ${rbToken}` };
@@ -1315,8 +1456,18 @@ export default class ProcessorProcessorPlugin extends Plugin {
                 file = await this.app.vault.create(filePath, initialContent);
             } catch (e: any) {
                  if (e.message?.toLowerCase().includes("file already exists")) {
+                    // Add a small delay and retry to handle race condition
+                    await new Promise(resolve => setTimeout(resolve, 100));
                     file = this.app.vault.getAbstractFileByPath(filePath) as TFile;
-                     if (!file) { console.error(`Failed to get file ${filePath} after 'already exists' error.`); return null; }
+                    if (!file) {
+                        // Try one more time after a longer delay
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                        file = this.app.vault.getAbstractFileByPath(filePath) as TFile;
+                        if (!file) {
+                            if (this.settings.verboseDebug) console.warn(`Could not retrieve processor file ${filePath} after 'already exists' error. This is likely a temporary issue.`);
+                            return null; // Gracefully return null for now
+                        }
+                    }
                  } else { console.error(`Error creating processor file ${filePath}:`, e); return null; }
             }
         }
@@ -1413,9 +1564,22 @@ export default class ProcessorProcessorPlugin extends Plugin {
                 file = await this.app.vault.create(subFilePath, initialContent);
             } catch (e: any) {
                 if (e.message?.toLowerCase().includes("file already exists")) {
+                    // Add a small delay and retry to handle race condition
+                    await new Promise(resolve => setTimeout(resolve, 100));
                     file = this.app.vault.getAbstractFileByPath(subFilePath) as TFile;
-                    if (!file) { console.error(`Failed to get subprocessor file ${subFilePath} after 'already exists' error.`); return; }
-                } else { console.error(`Error creating subprocessor file ${subFilePath}:`, e); return; }
+                    if (!file) {
+                        // Try one more time after a longer delay
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                        file = this.app.vault.getAbstractFileByPath(subFilePath) as TFile;
+                        if (!file) {
+                            if (this.settings.verboseDebug) console.warn(`Could not retrieve subprocessor file ${subFilePath} after 'already exists' error. This is likely a temporary issue.`);
+                            return; // Gracefully skip this file for now
+                        }
+                    }
+                } else { 
+                    console.error(`Error creating subprocessor file ${subFilePath}:`, e); 
+                    return; 
+                }
             }
         }
 
@@ -2213,6 +2377,10 @@ export default class ProcessorProcessorPlugin extends Plugin {
         };
 
         try {
+            if (this.settings.verboseDebug) {
+                console.log(`Creating revision for task '${taskName}' with payload:`, JSON.stringify(newRevisionPayload, null, 2));
+            }
+            
             // --- STEP 1: Create the new revision ---
             const createRevisionResponse = await requestUrl({
                 url: taskUrl,
@@ -2226,6 +2394,10 @@ export default class ProcessorProcessorPlugin extends Plugin {
                 new Notice(`Error creating task revision for '${taskName}': ${createRevisionResponse.status} ${createRevisionResponse.text.substring(0, 100)}`, 10000);
                 console.error(`Error creating task revision for '${taskName}':`, createRevisionResponse.status, createRevisionResponse.text);
                 return null;
+            } else {
+                if (this.settings.verboseDebug) {
+                    console.log(`Successfully created revision for '${taskName}'. Response:`, JSON.stringify(createRevisionResponse.json, null, 2));
+                }
             }
 
             // --- STEP 2: Find the latest revision from the immediate response ---
@@ -2462,7 +2634,12 @@ export default class ProcessorProcessorPlugin extends Plugin {
             
             // --- Step 4: Update all references to the archived files ---
             if (archivedFiles.length > 0) {
-                await this.updateFileReferences(archivedFiles);
+                // Create a mapping of archived files to their survivor
+                const archivedToSurvivorMap = new Map<string, string>();
+                archivedFiles.forEach(({ originalPath }) => {
+                    archivedToSurvivorMap.set(originalPath, survivorFile.path);
+                });
+                await this.updateFileReferences(archivedFiles, archivedToSurvivorMap);
             }
             
             mergeCount++;
@@ -2564,7 +2741,12 @@ export default class ProcessorProcessorPlugin extends Plugin {
             
             // Update references to archived files
             if (archivedFiles.length > 0) {
-                await this.updateFileReferences(archivedFiles);
+                // Create a mapping of archived files to their survivor
+                const archivedToSurvivorMap = new Map<string, string>();
+                archivedFiles.forEach(({ originalPath }) => {
+                    archivedToSurvivorMap.set(originalPath, survivorFile.path);
+                });
+                await this.updateFileReferences(archivedFiles, archivedToSurvivorMap);
             }
 
             new Notice(`Successfully merged ${duplicateFiles.length} file(s) into ${survivorFile.basename}.`);
@@ -2628,7 +2810,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
      * Updates all file references in the vault when files are moved during deduplication.
      * This prevents broken links by updating all Obsidian links and file references.
      */
-    private async updateFileReferences(archivedFiles: { originalPath: string, archivedPath: string }[]): Promise<void> {
+    private async updateFileReferences(archivedFiles: { originalPath: string, archivedPath: string }[], archivedToSurvivorMap?: Map<string, string>): Promise<void> {
         const allFiles = this.app.vault.getMarkdownFiles();
         
         for (const file of allFiles) {
@@ -2649,6 +2831,25 @@ export default class ProcessorProcessorPlugin extends Plugin {
                     });
                 }
                 
+                // Update Markdown links: [text](path) - specifically for subprocessor table links
+                const markdownLinkRegex = new RegExp(`\\[([^\\]]+)\\]\\(${originalPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\)`, 'g');
+                if (markdownLinkRegex.test(content)) {
+                    content = content.replace(markdownLinkRegex, (match, linkText) => {
+                        // For archived files, we should update the link to point to the survivor file
+                        const survivorPath = archivedToSurvivorMap?.get(originalPath);
+                        if (survivorPath) {
+                            const newLink = `[${linkText}](${survivorPath})`;
+                            contentChanged = true;
+                            return newLink;
+                        } else {
+                            // If we can't find a survivor, just mark it as archived
+                            const newLink = `[${linkText} (archived)](${archivedPath})`;
+                            contentChanged = true;
+                            return newLink;
+                        }
+                    });
+                }
+                
                 // Update file name references in text (for cases where just the name is mentioned)
                 const nameRegex = new RegExp(`\\b${originalName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g');
                 if (nameRegex.test(content)) {
@@ -2664,6 +2865,8 @@ export default class ProcessorProcessorPlugin extends Plugin {
             }
         }
     }
+
+
 
 
     async discoverRecursively(initialProcessorName: string, initialProcessorFile?: TFile, maxDepth = 3) {
@@ -3172,6 +3375,92 @@ class FileSelectorMergeModal extends Modal {
     }
 }
 
+class ModelSelectionModal extends Modal {
+    selectedModelId = '';
+    availableModels: LlmModel[] = [];
+    plugin: ProcessorProcessorPlugin;
+    onSubmit: (modelId: string) => Promise<void>;
+
+    constructor(app: App, plugin: ProcessorProcessorPlugin, availableModels: LlmModel[], onSubmit: (modelId: string) => Promise<void>) {
+        super(app);
+        this.plugin = plugin;
+        this.availableModels = availableModels;
+        this.onSubmit = onSubmit;
+        
+        // Default to Gemini 2.5 Flash if available
+        const defaultModel = availableModels.find(m => 
+            m.alias.toLowerCase().includes('gemini') && 
+            m.alias.toLowerCase().includes('flash')
+        );
+        this.selectedModelId = defaultModel?.id || availableModels[0]?.id || '';
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+        contentEl.createEl('h2', { text: 'Select Default Model' });
+        contentEl.createEl('p', { 
+            text: 'Choose a default AI model for all tasks. We recommend Gemini 2.5 Flash for cost-effectiveness and good performance. You can change individual task models later in the settings.' 
+        });
+
+        const modelGroup = contentEl.createDiv();
+        modelGroup.addClass('model-selection-group');
+
+        this.availableModels.forEach(model => {
+            const setting = new Setting(modelGroup)
+                .setName(model.alias)
+                .setDesc(this.getModelDescription(model.alias));
+
+            const radio = createEl('input', {
+                type: 'radio',
+                cls: 'model-selection-radio'
+            });
+            radio.name = "model-selection";
+            radio.value = model.id;
+            radio.checked = model.id === this.selectedModelId;
+            radio.onchange = () => {
+                this.selectedModelId = model.id;
+            };
+
+            setting.controlEl.appendChild(radio);
+        });
+
+        new Setting(contentEl)
+            .addButton(btn => btn
+                .setButtonText('Cancel')
+                .onClick(() => this.close()))
+            .addButton(btn => btn
+                .setButtonText('Continue with Setup')
+                .setCta()
+                .onClick(async () => {
+                    if (this.selectedModelId) {
+                        this.close();
+                        await this.onSubmit(this.selectedModelId);
+                    } else {
+                        new Notice('Please select a model to continue.');
+                    }
+                }));
+    }
+
+    private getModelDescription(alias: string): string {
+        const lowerAlias = alias.toLowerCase();
+        if (lowerAlias.includes('gemini') && lowerAlias.includes('flash')) {
+            return 'Recommended: Fast, cost-effective, good for most tasks';
+        } else if (lowerAlias.includes('gemini') && lowerAlias.includes('pro')) {
+            return 'High performance, higher cost';
+        } else if (lowerAlias.includes('claude')) {
+            return 'Excellent reasoning, good for complex tasks';
+        } else if (lowerAlias.includes('gpt')) {
+            return 'Reliable performance, widely used';
+        } else {
+            return 'AI model for task processing';
+        }
+    }
+
+    onClose() {
+        this.contentEl.empty();
+    }
+}
+
 class PasteEnvModal extends Modal {
     pastedText = '';
     plugin: ProcessorProcessorPlugin;
@@ -3252,17 +3541,41 @@ class PasteEnvModal extends Modal {
     
         await new Promise(resolve => setTimeout(resolve, 1000));
         
-        // --- FIX IS HERE: ---
-        // Just call the setup function and let it run. It handles its own success/fail notices.
-        // We no longer check for a return value here.
-        await this.plugin.setupRightBrainTasks({
-            apiUrl: settingsToUpdate.rightbrainApiUrl,
-            oauthUrl: settingsToUpdate.rightbrainOauth2Url,
-            clientId: settingsToUpdate.rightbrainClientId,
-            clientSecret: settingsToUpdate.rightbrainClientSecret,
-            orgId: settingsToUpdate.rightbrainOrgId,
-            projectId: settingsToUpdate.rightbrainProjectId
-        });
+        // --- Part 2: Fetch Available Models ---
+        new Notice("Fetching available models...");
+        await this.plugin.updateLlmModelList(true);
+        
+        if (this.plugin.settings.llmModelList.length === 0) {
+            new Notice("Failed to fetch available models. Please check your credentials and try again.", 7000);
+            return;
+        }
+        
+        // --- Part 3: Show Model Selection Modal ---
+        new ModelSelectionModal(
+            this.app, 
+            this.plugin, 
+            this.plugin.settings.llmModelList,
+            async (selectedModelId) => {
+                await this.completeSetupWithModel(selectedModelId, settingsToUpdate);
+            }
+        ).open();
+    }
+
+    /**
+     * Completes the setup process with the selected model.
+     */
+    async completeSetupWithModel(selectedModelId: string, settingsToUpdate: Partial<ProcessorProcessorSettings>) {
+        new Notice(`Selected model: ${this.plugin.settings.llmModelList.find(m => m.id === selectedModelId)?.alias || selectedModelId}`);
+        
+        // --- Part 4: Set up tasks with the selected model ---
+        await this.plugin.setupRightBrainTasksWithModel({
+            apiUrl: settingsToUpdate.rightbrainApiUrl!,
+            oauthUrl: settingsToUpdate.rightbrainOauth2Url!,
+            clientId: settingsToUpdate.rightbrainClientId!,
+            clientSecret: settingsToUpdate.rightbrainClientSecret!,
+            orgId: settingsToUpdate.rightbrainOrgId!,
+            projectId: settingsToUpdate.rightbrainProjectId!
+        }, selectedModelId);
 
         await this.plugin.applyRecommendedGraphSettings();
     }
@@ -3278,7 +3591,7 @@ class ProcessorProcessorSettingTab extends PluginSettingTab {
         this.plugin = plugin;
     }
 
-    display(): void {
+    async display(): Promise<void> {
         const { containerEl } = this;
         containerEl.empty();
         new Setting(containerEl).setName('Processor Processor Settings').setHeading();
@@ -3467,6 +3780,16 @@ class ProcessorProcessorSettingTab extends PluginSettingTab {
                     this.display(); 
                 }));
 
+        new Setting(containerEl)
+            .setName("Synchronize Tasks with RightBrain")
+            .setDesc("Force synchronization of all tasks with RightBrain. This will apply any model changes and update task configurations.")
+            .addButton(button => button
+                .setButtonText("Sync Now")
+                .onClick(async () => {
+                    new Notice("Synchronizing tasks with RightBrain...");
+                    await this.plugin.synchronizeRightBrainTasks();
+                }));
+
         const taskDefsForUI = [
             { name: "Verify Subprocessor List URL", settingKey: "verifyUrlModelId" },
             { name: "Extract Entities From Page Content", settingKey: "extractEntitiesModelId" },
@@ -3479,6 +3802,46 @@ class ProcessorProcessorSettingTab extends PluginSettingTab {
 
         const availableModels = this.plugin.settings.llmModelList;
         const defaultModel = availableModels.find(m => m.alias.toLowerCase().includes('gemini 1.5 flash'));
+
+        // Get current task configurations from RightBrain to show actual models in use
+        let currentTaskConfigs: Map<string, string> = new Map();
+        
+        if (this.plugin.settings.rightbrainOrgId && this.plugin.settings.rightbrainProjectId) {
+            try {
+                const rbToken = await this.plugin.getRightBrainAccessToken();
+                if (rbToken) {
+                    const creds = {
+                        apiUrl: this.plugin.settings.rightbrainApiUrl,
+                        oauthUrl: this.plugin.settings.rightbrainOauth2Url,
+                        clientId: this.plugin.settings.rightbrainClientId,
+                        clientSecret: this.plugin.settings.rightbrainClientSecret,
+                        orgId: this.plugin.settings.rightbrainOrgId,
+                        projectId: this.plugin.settings.rightbrainProjectId
+                    };
+                    
+                    // Use the public method to get task list
+                    const serverTasks = await this.plugin.listAllRightBrainTasks(rbToken, creds);
+                    if (serverTasks) {
+                        for (const task of serverTasks) {
+                            const revisions = task.task_revisions || task.revisions;
+                            if (revisions && revisions.length > 0) {
+                                const latestRevision = revisions.sort((a: any, b: any) => 
+                                    new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+                                )[0];
+                                if (latestRevision.llm_model_id) {
+                                    currentTaskConfigs.set(task.name, latestRevision.llm_model_id);
+                                    if (this.plugin.settings.verboseDebug) {
+                                        console.log(`Found current model for task '${task.name}': ${latestRevision.llm_model_id}`);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                console.warn("Could not fetch current task configurations:", error);
+            }
+        }
 
         taskDefsForUI.forEach(task => {
             new Setting(containerEl)
@@ -3495,14 +3858,34 @@ class ProcessorProcessorSettingTab extends PluginSettingTab {
                         dropdown.addOption(model.id, model.alias);
                     });
 
-                    // Set value to the saved setting, or the default model, or the first model
-                    const currentModelId = (this.plugin.settings as any)[task.settingKey];
-                    dropdown.setValue(currentModelId || (defaultModel ? defaultModel.id : availableModels[0].id));
+                    // Try to get the actual current model from RightBrain, fallback to saved setting, then default
+                    const currentModelId = currentTaskConfigs.get(task.name) || 
+                                        (this.plugin.settings as any)[task.settingKey] || 
+                                        (defaultModel ? defaultModel.id : (availableModels.length > 0 ? availableModels[0].id : ''));
+                    
+                    if (this.plugin.settings.verboseDebug) {
+                        console.log(`Setting dropdown for '${task.name}':`);
+                        console.log(`  - From RightBrain: ${currentTaskConfigs.get(task.name) || 'not found'}`);
+                        console.log(`  - From saved setting: ${(this.plugin.settings as any)[task.settingKey] || 'not set'}`);
+                        console.log(`  - Final selection: ${currentModelId}`);
+                    }
+                    
+                    dropdown.setValue(currentModelId);
 
                     dropdown.onChange(async (value) => {
                         (this.plugin.settings as any)[task.settingKey] = value;
                         await this.plugin.saveSettings();
                         new Notice(`${task.name} will now use ${dropdown.selectEl.options[dropdown.selectEl.selectedIndex].text}.`);
+                        
+                        // Trigger synchronization to apply the model change to RightBrain
+                        if (this.plugin.settings.autoSynchronizeTasks) {
+                            new Notice(`Applying model change for ${task.name} to RightBrain...`);
+                            setTimeout(() => {
+                                this.plugin.synchronizeRightBrainTasks();
+                            }, 1000);
+                        } else {
+                            new Notice(`Model changed for ${task.name}. Run "Synchronize Tasks with RightBrain" to apply changes.`);
+                        }
                     });
                 });
         });
