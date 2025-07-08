@@ -1,4 +1,4 @@
-import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, requestUrl, TFile, Menu, MenuItem, TFolder, TextAreaComponent, ButtonComponent } from 'obsidian';
+import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, requestUrl, TFile, Menu, MenuItem, TFolder, TextAreaComponent, ButtonComponent, normalizePath } from 'obsidian';
 
 // ----- CONSTANTS -----
 const SUBPROCESSOR_URL_KEYWORDS = [
@@ -261,7 +261,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
                 // Logic for single files
                 else if (fileOrFolder instanceof TFile && fileOrFolder.extension === 'md') {
                     const file = fileOrFolder as TFile;
-                     if (file.path.startsWith(this.settings.processorsFolderPath + "/")) {
+                     if (file.path.startsWith(normalizePath(this.settings.processorsFolderPath) + "/")) {
                         const fileCache = this.app.metadataCache.getFileCache(file);
                         const frontmatter = fileCache?.frontmatter;
                         const originalProcessorName = (frontmatter?.aliases && Array.isArray(frontmatter.aliases) && frontmatter.aliases.length > 0)
@@ -326,11 +326,11 @@ export default class ProcessorProcessorPlugin extends Plugin {
         );
 
         this.addSettingTab(new ProcessorProcessorSettingTab(this.app, this));
-        console.log('Processor Processor plugin loaded.');
+        // Plugin loaded
     }
 
     onunload() {
-        console.log('Processor Processor plugin unloaded.');
+        // Plugin unloaded
     }
 
     async loadSettings() {
@@ -2762,7 +2762,7 @@ export default class ProcessorProcessorPlugin extends Plugin {
     }
 
     private openFileSelectorMergeModal() {
-        const files = this.app.vault.getMarkdownFiles().filter(file => file.path.startsWith(this.settings.processorsFolderPath + "/"));
+        const files = this.app.vault.getMarkdownFiles().filter(file => file.path.startsWith(normalizePath(this.settings.processorsFolderPath) + "/"));
         if (files.length < 2) {
             new Notice("There are not enough processor files to perform a merge.");
             return;
@@ -2852,7 +2852,7 @@ class ManualInputModal extends Modal {
         contentEl.createEl('h2', { text: 'Manually Add Subprocessor List URL' });
 
         new Setting(contentEl)
-            .setName('Processor Name')
+            .setName('Processor name')
             .setDesc('Enter the name of the primary processor (e.g., OpenAI).')
             .addText(text => {
                 text.setPlaceholder('Enter processor name')
@@ -2865,7 +2865,7 @@ class ManualInputModal extends Modal {
             });
 
         new Setting(contentEl)
-            .setName('Subprocessor List URL')
+            .setName('Subprocessor list URL')
             .setDesc('Enter the direct URL to the subprocessor list or DPA page.')
             .addText(text =>
                 text.setPlaceholder('https://example.com/subprocessors')
@@ -2925,7 +2925,7 @@ class SearchModal extends Modal {
 
 
         new Setting(contentEl)
-            .setName('Processor Name')
+            .setName('Processor name')
             .setDesc('Enter the name of the processor to search for (e.g., Stripe).')
             .addText(text =>
                 text.setPlaceholder('Enter processor name')
@@ -3000,7 +3000,7 @@ class ManualTextEntryModal extends Modal {
             .setValue(this.pastedText)
             .onChange(value => this.pastedText = value);
         textArea.inputEl.rows = 10;
-        textArea.inputEl.style.width = '100%';
+        textArea.inputEl.addClass('processor-textarea');
         textArea.inputEl.setAttr("required", "true");
 
         new Setting(contentEl)
@@ -3190,8 +3190,8 @@ class PasteEnvModal extends Modal {
             .setPlaceholder('RB_ORG_ID="..."\nRB_PROJECT_ID="..."')
             .onChange(value => this.pastedText = value);
         textArea.inputEl.rows = 12;
-        textArea.inputEl.style.width = '100%';
-        textArea.inputEl.style.fontFamily = 'monospace';
+        textArea.inputEl.addClass('processor-textarea');
+        textArea.inputEl.addClass('processor-monospace');
 
         new Setting(contentEl)
             .addButton(button =>
@@ -3281,12 +3281,12 @@ class ProcessorProcessorSettingTab extends PluginSettingTab {
     display(): void {
         const { containerEl } = this;
         containerEl.empty();
-        containerEl.createEl('h2', { text: 'Processor Processor Settings' });
+        new Setting(containerEl).setName('Processor Processor Settings').setHeading();
 
         // --- API Keys & Credentials ---
-        containerEl.createEl('h3', { text: 'API Keys & Credentials' });
+        new Setting(containerEl).setName('API Keys & Credentials').setHeading();
         new Setting(containerEl)
-            .setName('SerpAPI Key')
+            .setName('SerpAPI key')
             .setDesc('Your SerpAPI Key for Google search functionality.')
             .addText(text => text
                 .setPlaceholder('Enter your SerpAPI key')
@@ -3297,7 +3297,7 @@ class ProcessorProcessorSettingTab extends PluginSettingTab {
                 }));
         
         // --- RightBrain Configuration ---
-        containerEl.createEl('h3', { text: 'RightBrain Task Configuration' });
+        new Setting(containerEl).setName('RightBrain Task Configuration').setHeading();
 
         new Setting(containerEl)
             .setName('Automatically Synchronize Tasks on Load')
@@ -3345,7 +3345,7 @@ class ProcessorProcessorSettingTab extends PluginSettingTab {
 
 
         // --- General Settings ---
-        containerEl.createEl('h3', { text: 'General Settings' });
+        new Setting(containerEl).setName('General Settings').setHeading();
         new Setting(containerEl)
             .setName('Create Pages for Own Entities')
             .setDesc('If enabled, separate Markdown pages will also be created for "own entities" identified during processing, not just third-party subprocessors.')
@@ -3433,7 +3433,7 @@ class ProcessorProcessorSettingTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 }));
 
-        containerEl.createEl('h2', { text: 'RightBrain Model Configuration' });
+        new Setting(containerEl).setName('RightBrain Model Configuration').setHeading();
 
         // --- THIS IS THE CORRECTED BLOCK ---
         new Setting(containerEl)
